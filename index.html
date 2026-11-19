@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="AirCast" />
+    <meta name="format-detection" content="telephone=no" />
+    <title>AirCast – Global Air Quality Intelligence</title>
+    <meta name="description" content="AirCast provides real-time planetary air quality intelligence, 24-hour predictive PM2.5 forecasting, and evidence-based respiratory health triage." />
+    <meta name="theme-color" content="#0c1d2d" />
+    <link rel="canonical" href="https://aircast.app/" />
+
+    <!-- Global Google Fonts with Multi-Script Noto Sans Support -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;600;700;800&family=Noto+Sans+Devanagari:wght@400;600;700;800&family=Noto+Sans+Tamil:wght@400;600;700&family=Noto+Sans+Telugu:wght@400;600;700&family=Noto+Sans+Bengali:wght@400;600;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Sans+SC:wght@400;700&display=swap" rel="stylesheet" />
+
+    <!-- Favicon & Touch Icons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+
+    <script>
+      window.__deferredPWAInstallPrompt = null;
+      window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        window.__deferredPWAInstallPrompt = e;
+        window.dispatchEvent(new CustomEvent('pwa-prompt-ready'));
+      });
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/sw.js').catch(function(err) {
+            console.debug('[SW] registration:', err);
+          });
+        });
+      }
+    </script>
+
+    <!-- OpenGraph & Social Sharing -->
+    <meta property="og:title" content="AirCast – Global Air Quality Intelligence" />
+    <meta property="og:description" content="Real-time planetary air quality intelligence with 24-hour predictive PM2.5 forecasting, TreeSHAP weather attribution, and respiratory health guidance." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AirCast" />
+    <meta property="og:url" content="https://aircast.app/" />
+    <meta property="og:image" content="/pwa-512x512.png" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+
+    <!-- Twitter Cards -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="AirCast – Global Air Quality Intelligence" />
+    <meta name="twitter:description" content="Real-time planetary air quality intelligence with 24-hour predictive PM2.5 forecasting, TreeSHAP weather attribution, and respiratory health guidance." />
+    <meta name="twitter:image" content="/pwa-512x512.png" />
+
+    <!-- Schema.org Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "AirCast",
+      "alternateName": "Global Air Quality Intelligence",
+      "url": "https://aircast.app/",
+      "applicationCategory": "HealthApplication",
+      "operatingSystem": "All",
+      "description": "AirCast provides real-time planetary air quality intelligence, 24-hour predictive PM2.5 forecasting, and evidence-based respiratory health triage.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="/aircast-all-in-one.js" defer></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

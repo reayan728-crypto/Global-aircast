@@ -1,0 +1,8 @@
+{
+  "name": "Global Air Quality Intelligence",
+  "description": "Global air quality intelligence with real-time planetary AQI monitoring, 24-hour predictive PM2.5 forecasting, and clinical respiratory triage.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,253 @@
+---
+name: Atmospheric Glass
+colors:
+  surface: '#f8f9ff'
+  surface-dim: '#cbdcf2'
+  surface-bright: '#f8f9ff'
+  surface-container-lowest: '#ffffff'
+  surface-container-low: '#eef4ff'
+  surface-container: '#e4efff'
+  surface-container-high: '#daeaff'
+  surface-container-highest: '#d3e4fb'
+  on-surface: '#0c1d2d'
+  on-surface-variant: '#44474c'
+  inverse-surface: '#223243'
+  inverse-on-surface: '#e9f1ff'
+  outline: '#75777c'
+  outline-variant: '#c5c6cc'
+  surface-tint: '#535f70'
+  primary: '#000713'
+  on-primary: '#ffffff'
+  primary-container: '#14202e'
+  on-primary-container: '#7c8899'
+  inverse-primary: '#bbc7da'
+  secondary: '#3f627a'
+  on-secondary: '#ffffff'
+  secondary-container: '#bde1fd'
+  on-secondary-container: '#42657d'
+  tertiary: '#000801'
+  on-tertiary: '#ffffff'
+  tertiary-container: '#00250b'
+  on-tertiary-container: '#009b46'
+  error: '#ba1a1a'
+  on-error: '#ffffff'
+  error-container: '#ffdad6'
+  on-error-container: '#93000a'
+  primary-fixed: '#d7e3f7'
+  primary-fixed-dim: '#bbc7da'
+  on-primary-fixed: '#101c2a'
+  on-primary-fixed-variant: '#3c4857'
+  secondary-fixed: '#c8e6ff'
+  secondary-fixed-dim: '#a7cbe6'
+  on-secondary-fixed: '#001e2e'
+  on-secondary-fixed-variant: '#264a61'
+  tertiary-fixed: '#71fe93'
+  tertiary-fixed-dim: '#52e079'
+  on-tertiary-fixed: '#002109'
+  on-tertiary-fixed-variant: '#005322'
+  background: '#f8f9ff'
+  on-background: '#0c1d2d'
+  surface-variant: '#d3e4fb'
+  aqi-good: '#00b050'
+  aqi-satisfactory: '#92d050'
+  aqi-moderate: '#ffc000'
+  aqi-poor: '#ff7f27'
+  aqi-very-poor: '#e53935'
+  aqi-severe: '#7b1f1f'
+  sky-good-start: '#bfe3ff'
+  sky-good-end: '#f2faff'
+  sky-satisfactory-start: '#d6ecd0'
+  sky-satisfactory-end: '#f6fbef'
+  sky-moderate-start: '#f3e3a8'
+  sky-moderate-end: '#fbf4dc'
+  sky-poor-start: '#f4c28f'
+  sky-poor-end: '#fbe8d4'
+  sky-very-poor-start: '#e49a8f'
+  sky-very-poor-end: '#f6d5cf'
+  sky-severe-start: '#b98a86'
+  sky-severe-end: '#e2c7c4'
+  metric-positive: '#2a9d6f'
+  metric-negative: '#e5603a'
+  focus-ring: '#1f6feb'
+  surface-glass: rgba(255, 255, 255, 0.58)
+  border-edge: rgba(20, 32, 46, 0.14)
+typography:
+  display-hero:
+    fontFamily: Bricolage Grotesque
+    fontSize: 44px
+    fontWeight: '800'
+    lineHeight: 48px
+    letterSpacing: -0.03em
+  display-hero-mobile:
+    fontFamily: Bricolage Grotesque
+    fontSize: 28px
+    fontWeight: '800'
+    lineHeight: 32px
+    letterSpacing: -0.02em
+  stat-dial:
+    fontFamily: Bricolage Grotesque
+    fontSize: 46px
+    fontWeight: '800'
+    lineHeight: 46px
+    letterSpacing: -0.02em
+  headline-lg:
+    fontFamily: Bricolage Grotesque
+    fontSize: 24px
+    fontWeight: '800'
+    lineHeight: 30px
+    letterSpacing: -0.02em
+  headline-md:
+    fontFamily: Bricolage Grotesque
+    fontSize: 19px
+    fontWeight: '800'
+    lineHeight: 24px
+    letterSpacing: -0.02em
+  headline-sm:
+    fontFamily: Bricolage Grotesque
+    fontSize: 16px
+    fontWeight: '700'
+    lineHeight: 22px
+    letterSpacing: -0.01em
+  lead-summary:
+    fontFamily: Bricolage Grotesque
+    fontSize: 19px
+    fontWeight: '400'
+    lineHeight: 28px
+  body-default:
+    fontFamily: Bricolage Grotesque
+    fontSize: 15px
+    fontWeight: '400'
+    lineHeight: 22px
+  body-strong:
+    fontFamily: Bricolage Grotesque
+    fontSize: 15px
+    fontWeight: '600'
+    lineHeight: 22px
+  label-md:
+    fontFamily: Bricolage Grotesque
+    fontSize: 14px
+    fontWeight: '600'
+    lineHeight: 18px
+  label-sm:
+    fontFamily: Bricolage Grotesque
+    fontSize: 13px
+    fontWeight: '600'
+    lineHeight: 16px
+  caption:
+    fontFamily: Bricolage Grotesque
+    fontSize: 13px
+    fontWeight: '400'
+    lineHeight: 18px
+  metric-axis:
+    fontFamily: Bricolage Grotesque
+    fontSize: 11px
+    fontWeight: '600'
+    lineHeight: 14px
+  metric-micro:
+    fontFamily: Bricolage Grotesque
+    fontSize: 10px
+    fontWeight: '400'
+    lineHeight: 12px
+rounded:
+  sm: 0.25rem
+  DEFAULT: 0.5rem
+  md: 0.75rem
+  lg: 1rem
+  xl: 1.5rem
+  full: 9999px
+spacing:
+  gutter: 1.125rem
+  margin: 1.25rem
+  space-xs: 0.375rem
+  space-sm: 0.5rem
+  space-md: 0.75rem
+  space-lg: 1.125rem
+  space-xl: 1.5rem
+---
+
+## Brand & Style
+
+This design system is engineered for next-generation environmental science, atmospheric forecasting, and real-time planetary monitoring. The brand personality balances hyper-precise meteorological engineering with calm, humanistic clarity. It avoids both sterile enterprise dashboards and alarmist emergency interfaces, delivering instead an authoritative, reassuring, and atmospheric experience.
+
+The visual style is **Ambient Glassmorphism**. Floating, translucent frosted-glass modules sit directly above reactive sky gradient canvasses that smoothly adapt to prevailing environmental conditions. Crisp ink lines, structural micro-borders, and high-readability grotesque typography anchor dynamic data points, predictive cone envelopes, and radial air chronometers.
+
+## Colors
+
+The color system operates across two interlocked layers: structural typography/chrome and dynamic atmospheric state tokens.
+
+### Chromatic Strategy
+- **Primary Ink (`#14202e`)**: High-contrast, dense slate navy. Anchors titles, primary figures, active selections, and focal SVG lines.
+- **Secondary Atmospheric Sky (`#bfe3ff`)**: Airy daylight tint representing unpolluted skies, used in brand backdrops, primary accents, and subtle tints.
+- **Tertiary Vitality (`#00b050`)**: Clean emerald baseline for safe, healthy environmental conditions.
+- **Neutral Muted Slate (`#4d5d70`)**: Calibrated for sub-headers, axis labels, explanatory notes, and micro metadata without losing legibility.
+
+### Dynamic AQI Spectrum
+Six regulatory categories define the analytical scale:
+- `aqi-good` (`#00b050`): Optimal clean air.
+- `aqi-satisfactory` (`#92d050`): Acceptable air quality with minimal impact.
+- `aqi-moderate` (`#ffc000`): Threshold value; cautionary for sensitive respiratory groups.
+- `aqi-poor` (`#ff7f27`): Unhealthy ambient particulate density.
+- `aqi-very-poor` (`#e53935`): Critical warning threshold.
+- `aqi-severe` (`#7b1f1f`): Hazardous emergency state.
+
+The application viewport background interpolates across the coordinated `sky-*-start` and `sky-*-end` pairs over a 600ms transition whenever the focal observation location or time step shifts.
+
+## Typography
+
+The type system is built on **Bricolage Grotesque**, providing an editorial, scientific voice with human warmth. Its deep ink traps and confident geometric shapes render dense statistical air metrics approachable without reducing precision.
+
+### Typographic Rules
+- **Tabular Numerics**: Enforce `font-variant-numeric: tabular-nums` on all continuous data readouts, real-time scrubbing outputs, confidence boundaries, and coordinate labels to eliminate horizontal reflow during state updates.
+- **Optical Sizing**: Enable dynamic optical sizing (`opsz@12..96`) to maintain readability across micro-axis scales (10px) through massive center dial displays (46px).
+- **Proportional Tightening**: Apply negative letter-spacing (`-0.02em` to `-0.03em`) on headings and numerical displays above 19px to preserve visual density.
+
+## Layout & Spacing
+
+The layout model utilizes a fluid 12-column foundation constrained within a generous max-width of `1240px` with dynamic outer gutter margins. The spacing follows an 8px base rhythm reinforced with 4px/2px subdivisions for tight instrumentation clusters.
+
+### Breakpoints & Adaptive Reflow
+- **Desktop (above 1100px)**: Asymmetric 2-column operational grid (`minmax(320px, 5fr) 7fr`), positioning real-time circular chronological instruments adjacent to multi-horizon trend charts. Secondary diagnostic cards split 50/50 (`1fr 1fr`).
+- **Tablet (901px – 1100px)**: Primary operational grid retains asymmetric ratio; bottom metric insight clusters collapse into single-column stacks (`1fr`).
+- **Mobile (<= 900px)**: Fluid single-column reflow (`1fr`). Internal card padding drops to `space-md` (12px), canvas outer padding compresses to 16px, and display headers adopt mobile tokens.
+
+## Elevation & Depth
+
+Visual hierarchy relies on **diffuse atmospheric transparency and low-contrast borders** rather than dark drop shadows. Surfaces appear as suspended physical glass planes over the ambient sky canvas.
+
+### Depth Architecture
+- **Base Canvas**: Ambient radial/linear gradient reflecting prevailing air metrics with a `0.6s` cubic-bezier easing interpolation.
+- **Glass Planes (Cards & Panels)**: Fills use `rgba(255, 255, 255, 0.58)` coupled with an active hardware-accelerated `-webkit-backdrop-filter: blur(10px)` and an edge border of `1px solid rgba(20, 32, 46, 0.14)`.
+- **Chart & Dial Overlays**: Sub-surfaces use `rgba(255, 255, 255, 0.85)` for center masks to prioritize legibility, with SVG uncertainty bands mapped at `0.12` opacity.
+- **Dynamic Luminance**: Pulse animations illuminate live telemetry dots with radiating aura rings (`box-shadow: 0 0 0 6px rgba(0, 176, 80, 0)`), providing living feedback without distracting from data readouts.
+
+## Shapes
+
+The geometric signature uses a proportional hierarchy scaled to component mass:
+- **Base Components (`roundedness: 2`, 8px)**: Standard controls, form inputs, city selection chips, and segmented pills.
+- **Micro Badges & Pipeline Tags (6px)**: Compact status flags and categorical tags.
+- **Metric Tracks & Bars (4px)**: SHAP influence bars and progress meters.
+- **Structural Containers (`rounded-xl`, 22px)**: Primary glass modules, forecast viewports, and narrative summary cards.
+- **Pills & Indicator Orbs (9999px / 50%)**: Telemetry status dots and quick-toggle toggles.
+
+## Components
+
+### Buttons & Interactive Chips
+- **Filter Chips**: Rendered with 8px radius, `7px 14px` padding, 13px semi-bold label, and `rgba(255, 255, 255, 0.58)` glass fill. Border is `1px solid rgba(20, 32, 46, 0.14)`.
+- **Active Selection**: Inverts to solid Primary Ink (`#14202e`) background with pure `#ffffff` text and crisp `#14202e` outline.
+- **Focus State**: Keyboard navigation displays a vibrant `3px solid #1f6feb` ring with `2px` offset.
+
+### Metric Cards & Structural Panels
+- Glass container with `22px` border radius, `18px` inner padding, and `1px solid rgba(20, 32, 46, 0.14)` border over `blur(10px)`.
+- Card headers pair an `H2` (`headline-md`, 19px, weight 800) with utility actions or live indicators.
+
+### Status Badges & Pipeline Pills
+- **Category Badge**: `6px` radius, `5px 10px` padding, 13px weight 600 text. Dynamically inherits background tint and stroke matching the active AQI category (`COL[c]`).
+- **Telemetry Live Pill**: Houses a centered 9px indicator dot pulsing at `1.6s` intervals (`#00b050`) alongside uppercase tracking labels.
+
+### Input Fields & Select Controls
+- Styled with `7px 10px` padding, 8px radius, `rgba(255, 255, 255, 0.7)` background, and subtle slate edge stroke. 
+- Scrubbing range sliders use a custom 4px track with Primary Ink draggable thumbs and tabular counter readouts.
+
+### Air Clock & Forecast Visualizations
+- **Radial Clock (`#dial`)**: Donut chart with procedural SVG arc wedges. Selected hour wedges feature a `2.5px` ink stroke highlight. Inner hub features a centered 46px tabular readout with secondary PM2.5 unit annotations.
+- **Uncertainty Chart (`#chart`)**: Polyline forecast paths (`2.5px` stroke) surrounded by an 80% confidence interval polygon (`0.12` opacity) and segmented category background thresholds (`0.13` opacity).

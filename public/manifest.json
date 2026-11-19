@@ -1,0 +1,38 @@
+{
+  "id": "/",
+  "name": "AirCast – Global Air Quality Intelligence",
+  "short_name": "AirCast",
+  "description": "AirCast provides real-time planetary air quality intelligence, 24-hour predictive PM2.5 forecasting, and evidence-based respiratory health triage.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0c1d2d",
+  "theme_color": "#0c1d2d",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

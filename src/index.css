@@ -1,0 +1,382 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Noto Sans', 'Noto Sans Devanagari', 'Noto Sans Tamil', 'Noto Sans Telugu', 'Noto Sans Arabic', 'Noto Sans Bengali', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-display: 'Bricolage Grotesque', 'Noto Sans', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    --color-primary-ink: #14202e;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    color: #0c1d2d;
+    background-color: #f5f2eb;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* RTL Support for Arabic, Urdu, Hebrew, Persian */
+  [dir="rtl"] {
+    text-align: right;
+  }
+  [dir="rtl"] .font-mono,
+  [dir="rtl"] [dir="ltr"] {
+    direction: ltr;
+    text-align: left;
+    display: inline-block;
+  }
+
+  /* Script-specific line-height and font adjustments */
+  [lang="ar"], [lang="ur"], [lang="fa"] {
+    font-family: 'Noto Sans Arabic', 'Noto Sans', system-ui, sans-serif;
+    line-height: 1.6;
+  }
+  [lang="hi"], [lang="mr"] {
+    font-family: 'Noto Sans Devanagari', 'Noto Sans', system-ui, sans-serif;
+  }
+  [lang="ta"] {
+    font-family: 'Noto Sans Tamil', 'Noto Sans', system-ui, sans-serif;
+  }
+  [lang="te"] {
+    font-family: 'Noto Sans Telugu', 'Noto Sans', system-ui, sans-serif;
+  }
+  [lang="bn"] {
+    font-family: 'Noto Sans Bengali', 'Noto Sans', system-ui, sans-serif;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-display);
+  }
+
+  /* Allow text wrapping on buttons and chips across varied script lengths */
+  button, .chip, [role="button"] {
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  /* Enforce tabular figures for all data indicators and numbers */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* Tactile haptic click scale-down animation for all buttons and interactive elements */
+button,
+[role="button"],
+a[role="button"],
+.interactive-tap {
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+              background-color 0.15s ease,
+              box-shadow 0.15s ease,
+              border-color 0.15s ease,
+              opacity 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+button:active:not(:disabled),
+[role="button"]:active:not(:disabled),
+a[role="button"]:active,
+.interactive-tap:active {
+  transform: scale(0.96) !important;
+}
+
+/* Natural environmental background overlay */
+.natural-ambient-canvas {
+  background-attachment: fixed;
+  position: relative;
+}
+
+/* Glassmorphism primitives */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(20, 32, 46, 0.12);
+  box-shadow: 0 4px 20px -2px rgba(20, 32, 46, 0.04);
+}
+
+.glass-panel-subtle {
+  background: rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(20, 32, 46, 0.09);
+}
+
+.glass-card-interactive {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(20, 32, 46, 0.12);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-card-interactive:hover {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(20, 32, 46, 0.22);
+  transform: translateY(-1px);
+}
+
+/* Pulsing live telemetry dot */
+@keyframes pulse-aura {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 176, 80, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(0, 176, 80, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 176, 80, 0);
+  }
+}
+
+.live-pulse {
+  animation: pulse-aura 1.8s infinite;
+}
+
+@keyframes pulse-alert {
+  0% {
+    box-shadow: 0 0 0 0 rgba(229, 57, 53, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(229, 57, 53, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(229, 57, 53, 0);
+  }
+}
+
+.alert-pulse {
+  animation: pulse-alert 1.5s infinite;
+}
+
+/* Smooth background transitions between AQI states */
+.sky-bg-transition {
+  transition: background 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Subtle fade-in and scale-up animation for AQI value display */
+@keyframes aqiDisplayPop {
+  0% {
+    opacity: 0.25;
+    transform: scale(0.91);
+  }
+  60% {
+    opacity: 0.96;
+    transform: scale(1.025);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-aqi-display {
+  display: inline-block;
+  animation: aqiDisplayPop 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+/* Apple & Android Mobile Layout Optimizations */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.touch-momentum {
+  -webkit-overflow-scrolling: touch;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 1rem);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+/* =========================================================
+   AirCast Accessibility, Communication & Pictogram Layout
+   Prevents overlap with bottom navigation pill & install bar
+   and guarantees usability on 380px viewports + HC/Large modes
+   ========================================================= */
+.aircast-anim-host {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.aircast-anim-host .anim-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Lift captions above bottom navigation pill */
+.a11y-caption {
+  bottom: 84px !important;
+  z-index: 99982 !important;
+}
+
+/* Keep floating buttons stacked cleanly above bottom-right page switcher */
+.a11y-fab {
+  right: 12px !important;
+  bottom: 84px !important;
+}
+
+.a11y-mic {
+  right: 12px !important;
+  bottom: 144px !important;
+}
+
+.cm-fab {
+  right: 12px !important;
+  bottom: 204px !important;
+}
+
+.av-btn {
+  right: 12px !important;
+  bottom: 264px !important;
+  z-index: 99990 !important;
+}
+
+.av-pill {
+  max-width: calc(100vw - 24px) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* Sign-language panel above bottom-left Install App pill */
+.a11y-sign {
+  left: 10px !important;
+  bottom: 84px !important;
+  max-width: calc(100vw - 80px) !important;
+}
+
+/* Accessibility settings panel */
+.a11y-panel {
+  right: 12px !important;
+  bottom: 144px !important;
+  max-height: calc(100vh - 170px) !important;
+}
+
+/* Communication sheet */
+.cm-sheet {
+  bottom: 80px !important;
+  max-height: calc(100vh - 104px) !important;
+}
+
+/* 380px-wide phone optimizations */
+@media (max-width: 440px) {
+  .a11y-fab,
+  .a11y-mic,
+  .cm-fab,
+  .av-btn {
+    width: 44px !important;
+    height: 44px !important;
+    border-radius: 22px !important;
+    font-size: 19px !important;
+    right: 8px !important;
+  }
+
+  .a11y-fab {
+    bottom: 78px !important;
+  }
+
+  .a11y-mic {
+    bottom: 130px !important;
+  }
+
+  .cm-fab {
+    bottom: 182px !important;
+  }
+
+  .av-btn {
+    bottom: 234px !important;
+  }
+
+  .a11y-sign {
+    left: 8px !important;
+    bottom: 78px !important;
+    width: min(210px, calc(100vw - 66px)) !important;
+  }
+
+  .a11y-panel {
+    right: 8px !important;
+    left: 8px !important;
+    width: auto !important;
+    bottom: 130px !important;
+    max-height: 62vh !important;
+  }
+
+  .cm-sheet {
+    left: 6px !important;
+    right: 6px !important;
+    bottom: 74px !important;
+    max-height: 70vh !important;
+  }
+
+  .a11y-caption {
+    bottom: 74px !important;
+    font-size: 14px !important;
+  }
+}
+
+/* High Contrast mode readability across AirCast glass cards */
+html.a11y-hc body,
+html.a11y-hc #root > div {
+  background: #000000 !important;
+  color: #ffffff !important;
+}
+
+html.a11y-hc .glass-panel,
+html.a11y-hc .glass-panel-subtle,
+html.a11y-hc .glass-card-interactive {
+  background: #000000 !important;
+  color: #ffffff !important;
+  border: 2px solid #ffff00 !important;
+  backdrop-filter: none !important;
+}
+
+html.a11y-hc h1,
+html.a11y-hc h2,
+html.a11y-hc h3,
+html.a11y-hc p,
+html.a11y-hc span,
+html.a11y-hc label {
+  color: #ffffff !important;
+}
+
+html.a11y-hc button,
+html.a11y-hc select,
+html.a11y-hc input {
+  background: #000000 !important;
+  color: #ffff00 !important;
+  border: 2px solid #ffff00 !important;
+}
+
+/* Large Text mode overflow prevention */
+html.a11y-large body,
+html.a11y-large #root {
+  overflow-x: hidden !important;
+  max-width: 100vw !important;
+}
+
+html.a11y-large .glass-panel,
+html.a11y-large section {
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+
+
