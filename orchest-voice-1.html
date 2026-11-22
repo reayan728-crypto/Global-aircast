@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orchest — Voice Air Quality Assistant</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #000000;
+      --surface: #0f172a;
+      --text: #ffffff;
+      --muted: #e2e8f0;
+      --accent: #1d4ed8;
+      --accent-hover: #1e40af;
+      --active: #047857;
+      --focus: #facc15;
+      --border: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.5;
+    }
+
+    main {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      padding: 24px 16px;
+      text-align: center;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2.2rem, 6vw, 3.2rem);
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      margin: -12px 0 0;
+      font-size: clamp(1.1rem, 3vw, 1.35rem);
+      color: var(--muted);
+      max-width: 34ch;
+    }
+
+    #start {
+      width: min(92vw, 560px);
+      min-height: 120px;
+      padding: 28px 32px;
+      font-size: clamp(1.6rem, 5vw, 2.3rem);
+      font-weight: 900;
+      line-height: 1.25;
+      color: var(--text);
+      background: var(--accent);
+      border: 4px solid var(--border);
+      border-radius: 24px;
+      cursor: pointer;
+      transition: transform 0.12s ease, background-color 0.15s ease;
+    }
+
+    #start:hover {
+      background: var(--accent-hover);
+    }
+
+    #start:active {
+      transform: scale(0.97);
+    }
+
+    #start[aria-pressed="true"] {
+      background: var(--active);
+    }
+
+    @keyframes voiceHapticListen {
+      0%, 100% {
+        transform: scale(1.02) translate3d(0, 0, 0);
+      }
+      20% {
+        transform: scale(1.045) translate3d(-1.5px, 0.5px, 0);
+      }
+      40% {
+        transform: scale(1.03) translate3d(1.5px, -0.5px, 0);
+      }
+      60% {
+        transform: scale(1.05) translate3d(-1px, -0.5px, 0);
+      }
+      80% {
+        transform: scale(1.035) translate3d(1px, 0.5px, 0);
+      }
+    }
+
+    #start.is-listening {
+      animation: voiceHapticListen 0.44s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite;
+      box-shadow: 0 0 24px rgba(16, 185, 129, 0.55);
+      will-change: transform;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #start.is-listening {
+        animation: none;
+        transform: scale(1.03);
+      }
+    }
+
+    #start:focus-visible {
+      outline: 6px solid var(--focus);
+      outline-offset: 6px;
+    }
+
+    #status {
+      font-size: clamp(1.25rem, 3.8vw, 1.6rem);
+      font-weight: 800;
+      color: var(--focus);
+      min-height: 2em;
+    }
+
+    #out {
+      width: 100%;
+      min-height: 110px;
+      padding: 20px 22px;
+      background: var(--surface);
+      border: 3px solid var(--border);
+      border-radius: 18px;
+      font-size: clamp(1.2rem, 3.5vw, 1.5rem);
+      font-weight: 600;
+      text-align: left;
+      color: var(--text);
+    }
+
+    #alert {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #fecaca;
+      min-height: 1.5em;
+    }
+
+    .hint {
+      font-size: 1.05rem;
+      color: var(--muted);
+      max-width: 48ch;
+      margin: 0;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Orchest</h1>
+    <p class="subtitle">Hands-free air quality voice assistant</p>
+
+    <button
+      id="start"
+      type="button"
+      aria-pressed="false"
+      aria-label="Start Orchest voice assistant"
+    >
+      Start Orchest
+    </button>
+
+    <div id="status" role="status" aria-live="polite" aria-atomic="true">
+      Press Start to begin listening.
+    </div>
+
+    <div id="out" role="region" aria-label="Assistant response" aria-live="polite" aria-atomic="true">
+      Say "Orchest", wait for "What do you need?", then say any city name or "all cities".
+    </div>
+
+    <div id="alert" role="alert" aria-live="assertive" aria-atomic="true"></div>
+
+    <p class="hint">
+      Examples: "Orchest" &rarr; "Coimbatore" &bull; "Orchest Coimbatore" &bull; "Orchest all cities" &bull; Press Escape to stop speaking.
+    </p>
+  </main>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const MAJOR_CITIES = [
+        'Delhi',
+        'Mumbai',
+        'Chennai',
+        'Kolkata',
+        'Bengaluru',
+        'Hyderabad',
+        'Coimbatore',
+        'Madurai',
+        'Pune',
+        'Ahmedabad'
+      ];
+
+      // Accept "Orchest" and common speech-recognition variants
+      const WAKE_WORDS = [
+        'orchest',
+        'orchestra',
+        'orchestrate',
+        'orkest',
+        'orchid',
+        'orcast'
+      ];
+
+      const SpeechRecognitionAPI =
+        window.SpeechRecognition || window.webkitSpeechRecognition;
+
+      const startBtn = document.getElementById('start');
+      const statusEl = document.getElementById('status');
+      const outEl = document.getElementById('out');
+      const alertEl = document.getElementById('alert');
+
+      let recognition = null;
+      let running = false;
+      let recActive = false;
+      let speaking = false;
+      let awake = false;
+      let busy = false;
+      let cancelBatch = false;
+      let restartTimer = null;
+      let awakeTimer = null;
+      let audioCtx = null;
+
+      /* ---------------- Subtle audio chimes for non-visual feedback ---------------- */
+      function chime(freqs) {
+        try {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (!AC) return;
+          if (!audioCtx) audioCtx = new AC();
+          if (audioCtx.state === 'suspended') audioCtx.resume();
+          const now = audioCtx.currentTime;
+          freqs.forEach((f, idx) => {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = f;
+            gain.gain.setValueAtTime(0.08, now + idx * 0.09);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.09 + 0.14);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(now + idx * 0.09);
+            osc.stop(now + idx * 0.09 + 0.15);
+          });
+        } catch (_) {
+          // AudioContext optional
+        }
+      }
+
+      function setStatus(msg) {
+        statusEl.textContent = msg;
+      }
+
+      function setError(msg) {
+        alertEl.textContent = msg;
+      }
+
+      function clearError() {
+        alertEl.textContent = '';
+      }
+
+      /* ---------------- Recognition lifecycle (strictly paused while speaking) ---------------- */
+      function stopRecognition() {
+        clearTimeout(restartTimer);
+        startBtn.classList.remove('is-listening');
+        if (!recognition) return;
+        try {
+          recognition.onend = null;
+          recognition.stop();
+        } catch (_) {
+          // ignore
+        }
+        recActive = false;
+      }
+
+      function startRecognition() {
+        if (!running || speaking || recActive || !SpeechRecognitionAPI) return;
+        clearTimeout(restartTimer);
+        try {
+          recognition = new SpeechRecognitionAPI();
+          recognition.lang = 'en-IN';
+          recognition.continuous = true;
+          recognition.interimResults = false;
+          recognition.maxAlternatives = 2;
+
+          recognition.onstart = () => {
+            recActive = true;
+            startBtn.classList.add('is-listening');
+            setStatus(awake ? 'Listening for your request...' : 'Listening — say "Orchest"');
+          };
+
+          recognition.onresult = (event) => {
+            if (speaking || busy) return;
+            const last = event.results[event.results.length - 1];
+            if (!last || !last.isFinal) return;
+            const transcript = (last[0] && last[0].transcript ? last[0].transcript : '').trim();
+            if (!transcript) return;
+            onTranscript(transcript);
+          };
+
+          recognition.onerror = (event) => {
+            recActive = false;
+            startBtn.classList.remove('is-listening');
+            const err = event && event.error;
+            if (err === 'not-allowed' || err === 'service-not-allowed') {
+              running = false;
+              awake = false;
+              updateButton();
+              const msg = 'Microphone permission was denied. Please allow microphone access in your browser settings and press Start again.';
+              setError(msg);
+              setStatus('Microphone permission denied');
+              chime([330, 260]);
+              say(msg, { resumeAfter: false });
+              return;
+            }
+            if (err === 'audio-capture') {
+              const msg = 'No microphone was found. Please check your microphone and try again.';
+              setError(msg);
+              setStatus('Microphone not found');
+              chime([330, 260]);
+              say(msg, { resumeAfter: false });
+              running = false;
+              updateButton();
+              return;
+            }
+            if (err === 'network') {
+              setError('Voice recognition had a network issue. Retrying...');
+            }
+            // For no-speech / aborted / network, auto-restart cleanly
+            if (running && !speaking) {
+              restartTimer = setTimeout(startRecognition, 400);
+            }
+          };
+
+          recognition.onend = () => {
+            recActive = false;
+            startBtn.classList.remove('is-listening');
+            if (running && !speaking) {
+              restartTimer = setTimeout(startRecognition, 250);
+            }
+          };
+
+          recognition.start();
+        } catch (_) {
+          recActive = false;
+          startBtn.classList.remove('is-listening');
+          if (running && !speaking) {
+            restartTimer = setTimeout(startRecognition, 600);
+          }
+        }
+      }
+
+      /* ---------------- Speech synthesis (pauses mic so it never hears itself) ---------------- */
+      function say(text, options) {
+        const opts = options || {};
+        const resumeAfter = opts.resumeAfter !== false;
+
+        return new Promise((resolve) => {
+          speaking = true;
+          stopRecognition();
+          outEl.textContent = text;
+
+          if (!('speechSynthesis' in window)) {
+            speaking = false;
+            if (resumeAfter && running) restartTimer = setTimeout(startRecognition, 250);
+            resolve();
+            return;
+          }
+
+          let finished = false;
+          const done = () => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(safetyTimer);
+            // Short echo guard before reopening the microphone
+            setTimeout(() => {
+              speaking = false;
+              if (resumeAfter && running) {
+                startRecognition();
+              }
+              resolve();
+            }, 280);
+          };
+
+          try {
+            window.speechSynthesis.cancel();
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = 'en-IN';
+            utter.rate = 0.96;
+            utter.pitch = 1.0;
+
+            const voices = window.speechSynthesis.getVoices() || [];
+            const preferred =
+              voices.find((v) => /en[-_]IN/i.test(v.lang)) ||
+              voices.find((v) => /^en/i.test(v.lang));
+            if (preferred) utter.voice = preferred;
+
+            utter.onend = done;
+            utter.onerror = done;
+
+            // Watchdog in case a browser drops onend for long utterances
+            const maxMs = Math.max(8000, text.length * 110);
+            var safetyTimer = setTimeout(done, maxMs);
+
+            window.speechSynthesis.speak(utter);
+          } catch (_) {
+            done();
+          }
+        });
+      }
+
+      /* ---------------- Open-Meteo free no-key APIs ---------------- */
+      async function fetchAirQuality(cityQuery) {
+        if (!navigator.onLine) {
+          throw new Error('offline');
+        }
+
+        const geoUrl =
+          'https://geocoding-api.open-meteo.com/v1/search?name=' +
+          encodeURIComponent(cityQuery) +
+          '&count=3&language=en&format=json';
+        const geoRes = await fetch(geoUrl);
+        if (!geoRes.ok) throw new Error('network');
+        const geo = await geoRes.json();
+        if (!geo.results || !geo.results.length) return null;
+
+        // Prefer Indian city match if multiple results share a name
+        const place =
+          geo.results.find((r) => r.country_code === 'IN') || geo.results[0];
+
+        const aqUrl =
+          'https://air-quality-api.open-meteo.com/v1/air-quality' +
+          '?latitude=' + encodeURIComponent(place.latitude) +
+          '&longitude=' + encodeURIComponent(place.longitude) +
+          '&current=us_aqi,pm2_5' +
+          '&hourly=us_aqi' +
+          '&forecast_days=2' +
+          '&timezone=auto';
+
+        const aqRes = await fetch(aqUrl);
+        if (!aqRes.ok) throw new Error('network');
+        const aq = await aqRes.json();
+
+        const currentAqi =
+          aq.current && typeof aq.current.us_aqi === 'number'
+            ? Math.round(aq.current.us_aqi)
+            : null;
+        const currentPm25 =
+          aq.current && typeof aq.current.pm2_5 === 'number'
+            ? Math.round(aq.current.pm2_5)
+            : null;
+
+        if (currentAqi === null) throw new Error('no-data');
+
+        // Find the cleanest hour in the next 24 hours
+        let best = null;
+        if (aq.hourly && Array.isArray(aq.hourly.time) && Array.isArray(aq.hourly.us_aqi)) {
+          const nowMs = aq.current && aq.current.time
+            ? new Date(aq.current.time).getTime()
+            : Date.now();
+          const endMs = nowMs + 24 * 3600 * 1000;
+
+          for (let i = 0; i < aq.hourly.time.length; i++) {
+            const ms = new Date(aq.hourly.time[i]).getTime();
+            const val = aq.hourly.us_aqi[i];
+            if (ms >= nowMs && ms <= endMs && typeof val === 'number') {
+              const rounded = Math.round(val);
+              if (!best || rounded < best.aqi) {
+                best = { time: aq.hourly.time[i], aqi: rounded };
+              }
+            }
+          }
+        }
+
+        return {
+          name: place.name,
+          admin: place.admin1 || place.country || '',
+          aqi: currentAqi,
+          pm25: currentPm25,
+          best
+        };
+      }
+
+      function getCategoryAndAdvice(aqi) {
+        if (aqi <= 50) {
+          return {
+            category: 'Good',
+            outdoor: 'It is safe to go outside.',
+            mask: 'No mask is needed.',
+            shortMask: 'No mask needed.'
+          };
+        }
+        if (aqi <= 100) {
+          return {
+            category: 'Moderate',
+            outdoor: 'It is generally fine to go outside.',
+            mask: 'No mask is needed for most people, though people with asthma or breathing issues may carry one.',
+            shortMask: 'Mask optional.'
+          };
+        }
+        if (aqi <= 150) {
+          return {
+            category: 'Unhealthy for sensitive groups',
+            outdoor: 'Limit long outdoor activity, especially if you have asthma, heart, or lung conditions.',
+            mask: 'Wear a well-fitted N95 mask if you spend time outdoors.',
+            shortMask: 'Wear a mask if sensitive.'
+          };
+        }
+        if (aqi <= 200) {
+          return {
+            category: 'Unhealthy',
+            outdoor: 'Keep outdoor time short and avoid heavy exercise outside.',
+            mask: 'Wear an N95 mask when going outdoors.',
+            shortMask: 'Wear an N95 mask.'
+          };
+        }
+        if (aqi <= 300) {
+          return {
+            category: 'Very Unhealthy',
+            outdoor: 'Avoid going outside and stay indoors if you can.',
+            mask: 'If you must go out, wear a well-fitted N95 mask.',
+            shortMask: 'Avoid going out; wear an N95 mask.'
+          };
+        }
+        return {
+          category: 'Hazardous',
+          outdoor: 'Please stay indoors with windows closed.',
+          mask: 'Wear a well-fitted N95 mask if you must step outside.',
+          shortMask: 'Stay indoors; N95 mask required.'
+        };
+      }
+
+      function formatHour(iso) {
+        const d = new Date(iso);
+        let h = d.getHours();
+        const suffix = h >= 12 ? 'PM' : 'AM';
+        h = h % 12 || 12;
+        return h + ' ' + suffix;
+      }
+
+      /* ---------------- Spoken reports ---------------- */
+      async function reportCity(cityQuery) {
+        clearError();
+        setStatus('Checking ' + cityQuery + '...');
+        await say('Checking air quality for ' + cityQuery + '.', { resumeAfter: false });
+
+        try {
+          const data = await fetchAirQuality(cityQuery);
+          if (!data) {
+            const msg = 'Sorry, I could not find ' + cityQuery + '. Please say Orchest and try another city name.';
+            setError(msg);
+            await say(msg);
+            return;
+          }
+
+          const info = getCategoryAndAdvice(data.aqi);
+          const pmPart = data.pm25 !== null ? ' PM 2.5 is ' + data.pm25 + ' micrograms per cubic meter.' : '';
+          const bestPart = data.best
+            ? ' The best time to go outside in the next 24 hours is around ' +
+              formatHour(data.best.time) +
+              ', when the AQI is expected to be ' +
+              data.best.aqi +
+              '.'
+            : '';
+
+          const fullReport =
+            data.name +
+            ': Air Quality Index is ' + data.aqi + ', which is ' + info.category + '.' +
+            pmPart + ' ' +
+            info.outdoor + ' ' +
+            info.mask +
+            bestPart;
+
+          await say(fullReport);
+        } catch (err) {
+          const msg =
+            err && err.message === 'offline'
+              ? 'You appear to be offline. Please check your internet connection and try again.'
+              : 'Sorry, I could not fetch the air quality data right now. Please check your internet connection and try again.';
+          setError(msg);
+          chime([330, 260]);
+          await say(msg);
+        }
+      }
+
+      async function reportAllCities() {
+        clearError();
+        cancelBatch = false;
+        setStatus('Reading all major Indian cities...');
+        await say('Reading live air quality and mask advice for ten major Indian cities.', { resumeAfter: false });
+
+        let spokenCount = 0;
+        for (const city of MAJOR_CITIES) {
+          if (cancelBatch || !running) break;
+          setStatus('Checking ' + city + '...');
+          try {
+            const data = await fetchAirQuality(city);
+            if (cancelBatch || !running) break;
+            if (data) {
+              const info = getCategoryAndAdvice(data.aqi);
+              const line =
+                data.name + ': AQI ' + data.aqi + ', ' + info.category + '. ' + info.shortMask;
+              spokenCount++;
+              await say(line, { resumeAfter: false });
+            }
+          } catch (_) {
+            if (!navigator.onLine) {
+              const msg = 'Internet connection lost while reading all cities. Please check your connection.';
+              setError(msg);
+              await say(msg);
+              return;
+            }
+          }
+        }
+
+        if (!cancelBatch && running) {
+          if (spokenCount === 0) {
+            await say('Sorry, I could not load air quality data. Please check your internet connection.');
+          } else {
+            await say('Finished reading all major cities. Say Orchest whenever you need me.');
+          }
+        }
+      }
+
+      /* ---------------- Query parsing & wake-word flow ---------------- */
+      function extractCity(raw) {
+        return raw
+          .replace(/^(?:what(?:'s| is)?|tell me|check|give me|show|read|get)\s+/i, '')
+          .replace(/^(?:the\s+)?(?:air quality|aqi|pollution|weather)\s+/i, '')
+          .replace(/\b(?:air quality|aqi|pollution|weather|index|now|today|please|in|for|of|at|about)\b/gi, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
+      async function handleRequest(rawQuery) {
+        const cleaned = rawQuery.toLowerCase().replace(/[.,?!;:'"]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!cleaned) {
+          await say('I did not catch that. Please say Orchest and try again.');
+          return;
+        }
+
+        if (/\b(all cities|every city|major cities|indian cities)\b/.test(cleaned)) {
+          await reportAllCities();
+          return;
+        }
+
+        if (/\b(stop|cancel|quiet|silence|never mind)\b/.test(cleaned)) {
+          await say('Okay, stopped. Say Orchest whenever you need me.');
+          return;
+        }
+
+        const city = extractCity(cleaned) || cleaned;
+        await reportCity(city);
+      }
+
+      function findWakeWord(lowerText) {
+        for (const w of WAKE_WORDS) {
+          const idx = lowerText.indexOf(w);
+          if (idx !== -1) {
+            return { word: w, after: lowerText.slice(idx + w.length).trim() };
+          }
+        }
+        return null;
+      }
+
+      async function onTranscript(transcript) {
+        const lower = transcript.toLowerCase().trim();
+        clearTimeout(awakeTimer);
+
+        if (!awake) {
+          const match = findWakeWord(lower);
+          if (!match) return;
+
+          chime([660, 880]);
+          const remainder = match.after.replace(/^[,\s]+/, '').trim();
+
+          if (remainder) {
+            // One-sentence command e.g. "Orchest Coimbatore" or "Orchest all cities"
+            busy = true;
+            awake = false;
+            try {
+              await handleRequest(remainder);
+            } finally {
+              busy = false;
+              setStatus(running ? 'Listening — say "Orchest"' : 'Stopped');
+            }
+          } else {
+            // Wake word only -> ask "What do you need?" and listen for one request
+            busy = true;
+            awake = true;
+            setStatus('Listening for your request...');
+            try {
+              await say('What do you need?');
+            } finally {
+              busy = false;
+            }
+            // Return to standby if no request arrives within 15 seconds
+            awakeTimer = setTimeout(() => {
+              if (awake && !busy) {
+                awake = false;
+                setStatus('Listening — say "Orchest"');
+              }
+            }, 15000);
+          }
+          return;
+        }
+
+        // Awake: treat this utterance as the user's single request
+        awake = false;
+        busy = true;
+        try {
+          // If user repeated the wake word before the city, strip it cleanly
+          const maybeWake = findWakeWord(lower);
+          const query = maybeWake && maybeWake.after ? maybeWake.after : lower;
+          await handleRequest(query);
+        } finally {
+          busy = false;
+          setStatus(running ? 'Listening — say "Orchest"' : 'Stopped');
+        }
+      }
+
+      /* ---------------- Start / Stop controls ---------------- */
+      function updateButton() {
+        startBtn.setAttribute('aria-pressed', running ? 'true' : 'false');
+        startBtn.textContent = running ? 'Stop Orchest' : 'Start Orchest';
+        startBtn.setAttribute(
+          'aria-label',
+          running ? 'Stop Orchest voice assistant' : 'Start Orchest voice assistant'
+        );
+      }
+
+      function stopAssistant() {
+        running = false;
+        awake = false;
+        busy = false;
+        cancelBatch = true;
+        clearTimeout(awakeTimer);
+        clearTimeout(restartTimer);
+        stopRecognition();
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+        speaking = false;
+        updateButton();
+        setStatus('Stopped. Press Start to listen again.');
+        chime([440, 330]);
+      }
+
+      async function startAssistant() {
+        clearError();
+        if (!SpeechRecognitionAPI) {
+          const msg = 'Sorry, voice recognition is not supported in this browser. Please open Orchest in Google Chrome.';
+          setError(msg);
+          setStatus('Browser not supported');
+          await say(msg, { resumeAfter: false });
+          return;
+        }
+
+        running = true;
+        awake = false;
+        busy = false;
+        cancelBatch = false;
+        updateButton();
+        chime([520, 780]);
+        setStatus('Starting Orchest...');
+
+        await say('Orchest is ready. Say Orchest to begin.');
+      }
+
+      startBtn.addEventListener('click', () => {
+        if (running) {
+          stopAssistant();
+        } else {
+          startAssistant();
+        }
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && (running || speaking)) {
+          stopAssistant();
+        }
+      });
+
+      // Preload voices on browsers that populate them asynchronously
+      if ('speechSynthesis' in window && window.speechSynthesis.onvoiceschanged !== undefined) {
+        window.speechSynthesis.onvoiceschanged = () => {
+          window.speechSynthesis.getVoices();
+        };
+      }
+    })();
+  </script>
+</body>
+</html>

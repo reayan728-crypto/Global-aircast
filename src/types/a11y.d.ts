@@ -23,11 +23,24 @@ export interface AirCastA11ySignWords {
   help: string;
 }
 
+export interface PlaceSelectionResult {
+  found: boolean;
+  city?: string;
+  state?: string;
+  country?: string;
+  aqi?: number;
+  category?: string;
+  pm25?: number;
+  summary?: string;
+  context?: AirCastAssistantContext;
+}
+
 export interface AirCastA11yConfig {
   getLang?: () => string;
   getSummary?: () => string;
   getForecast?: () => string;
   getAdvice?: () => string;
+  onSelectPlace?: (query: string) => PlaceSelectionResult | null;
   t?: (key: string, vars?: Record<string, string | number>) => string;
   signClips?: Partial<AirCastA11ySignClips>;
   signWords?: Partial<AirCastA11ySignWords>;
@@ -40,13 +53,14 @@ export interface AirCastA11yConfig {
 
 export interface AirCastA11yAPI {
   configure: (config: AirCastA11yConfig) => void;
-  setAqi: (aqi: number, city?: string) => void;
+  setAqi: (aqi: number, city?: string, opts?: { silent?: boolean }) => void;
   announce: (text: string, level?: 'info' | 'severe') => void;
   speak: (text: string, priority?: boolean) => void;
   readPage: () => void;
   command: (cmd: string) => void;
   intent?: (text: string) => string | null;
   status?: () => { aqi: number | null; place: string; level: string | null };
+  setOption?: (key: string, value: boolean) => void;
   open: (open?: boolean) => void;
   refresh: () => void;
 }
@@ -79,15 +93,21 @@ export interface AirCastAssistantContext {
 }
 
 export interface AirCastAssistantConfig {
+  getLang?: () => string;
+  setLanguage?: (code: string) => void;
   getContext?: () => AirCastAssistantContext;
+  onSelectPlace?: (query: string) => PlaceSelectionResult | null;
   idleMinutes?: number;
 }
 
 export interface AirCastAssistantAPI {
   configure: (config: AirCastAssistantConfig) => void;
+  setLanguage?: (code: string) => void;
+  getLang?: () => string;
   start: () => void;
   stop: () => void;
   ask: (q: string) => void;
+  greet?: () => void;
 }
 
 declare global {

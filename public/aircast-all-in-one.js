@@ -42,6 +42,7 @@
     getSummary: null,    // () => string spoken for "read air quality"
     getForecast: null,   // () => string spoken for "forecast"
     getAdvice: null,     // () => string spoken for "health advice"
+    onSelectPlace: null, // (query) => { found, summary, context } direct app hook for all cities/states/countries
     t: null,             // (key, lang) => string  (use your own translations if you have them)
     selectors: {         // optional CSS selectors; otherwise text matching is used
       page1: '', page2: '', simulator: '', planner: '',
@@ -111,7 +112,7 @@
     { id: 'advice', words: ['advice', 'health', 'safe', 'mask', 'सलाह', 'स्वास्थ्य', 'ஆலோசனை'] },
     { id: 'read', words: ['read', 'air quality', 'aqi', 'current', 'वायु', 'पढ़', 'காற்று', 'படி'] }
   ];
-  var CITY_RE = /(?:change city to|city|शहर बदलो|शहर|நகரம்)\s+(.+)/i;
+  var CITY_RE = /(?:(?:change|set|switch|select|open|show|move|navigate|go|visit|pick|choose|check|update)\s+(?:the\s+)?(?:(?:city|state|country|district|place|location|region|station)\s+)?(?:to|into|of|as|for)?\s*|(?:city|state|country|district|location|शहर बदलो|शहर|राज्य बदलो|राज्य|देश बदलो|देश|நகரம்|மாநிலம்|நாடு|నగరం|రాష్ట్రం|దేశం|ನಗರ|ರಾಜ್ಯ|ದೇಶ|നഗരം|സംസ്ഥാനം|രാജ്യം)\s+)(.+)/i;
 
   /* -------------------------------- state -------------------------------- */
   var KEY = 'aircast_a11y_v1';
@@ -151,7 +152,8 @@
       '.a11y-skip:focus{top:8px}',
       '.a11y-fab{position:fixed;right:12px;bottom:96px;z-index:99990;width:52px;height:52px;border-radius:26px;border:2px solid #fff;background:#0f172a;color:#fff;font-size:24px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35)}',
       '.a11y-mic{position:fixed;right:12px;bottom:156px;z-index:99990;width:52px;height:52px;border-radius:26px;border:2px solid #fff;background:#16a34a;color:#fff;font-size:22px;cursor:pointer;display:none;box-shadow:0 4px 14px rgba(0,0,0,.35)}',
-      '.a11y-mic.on{display:block}.a11y-mic.live{background:#dc2626}',
+      '@keyframes a11yMicHaptic{0%,100%{transform:scale(1.05) translate3d(0,0,0)}25%{transform:scale(1.08) translate3d(-1.5px,0.5px,0)}50%{transform:scale(1.06) translate3d(1.5px,-0.5px,0)}75%{transform:scale(1.09) translate3d(-1px,-0.5px,0)}}',
+      '.a11y-mic.on{display:block}.a11y-mic.live{background:#dc2626;animation:a11yMicHaptic 0.42s cubic-bezier(.36,.07,.19,.97) infinite}',
       '.a11y-panel{position:fixed;right:12px;bottom:156px;z-index:99995;width:min(320px,calc(100vw - 24px));max-height:70vh;overflow:auto;background:#fff;color:#0f172a;border:2px solid #0f172a;border-radius:16px;padding:14px;font:15px/1.4 system-ui,sans-serif;display:none;box-shadow:0 10px 30px rgba(0,0,0,.35)}',
       '.a11y-panel.open{display:block}',
       '.a11y-panel h2{margin:0 0 10px;font-size:18px}',
@@ -239,13 +241,6 @@
     hb.addEventListener('click', function () { speak(t('helpText')); });
     r.appendChild(rb); r.appendChild(hb);
     els.panel.appendChild(r);
-    var tr = el('div', 'a11y-row');
-    var tb = el('button', 'a11y-btn', '🔔 ' + t('testAlert'));
-    tb.addEventListener('click', function () { window.AirCastA11y.announce('Test: severe air quality alert at 22:00. Stay indoors.', 'severe'); });
-    var sb = el('button', 'a11y-btn', '🤟 ' + t('testSign'));
-    sb.addEventListener('click', function () { setOption('sign', true); showSign('emergency', 'Test: emergency'); });
-    tr.appendChild(tb); tr.appendChild(sb);
-    els.panel.appendChild(tr);
     var c = el('div', 'a11y-row');
     var cb = el('button', 'a11y-btn', t('close'));
     cb.addEventListener('click', function () { togglePanel(false); });
@@ -343,18 +338,65 @@
 
   function statusText() { return (lastPlace ? lastPlace + ': ' : '') + 'AQI ' + lastAqi + ' - ' + LEVEL_EN[lastLevel]; }
 
-  function setAqi(aqi, place) {
+  function setAqi(aqi, place, opts) {
     if (typeof aqi !== 'number' || isNaN(aqi)) return;
+    var silent = !!(opts && opts.silent);
     var level = levelFromAqi(aqi);
-    var rose = lastLevel && RANK[level] > RANK[lastLevel] && RANK[level] >= 4;
-    lastAqi = aqi; lastPlace = place || lastPlace;
+    var hadPrev = lastLevel !== null;
+    var placeChanged = !!(place && lastPlace && place !== lastPlace);
     var changed = level !== lastLevel;
+    var isHigh = RANK[level] >= 4;
+    var rose = hadPrev && RANK[level] > RANK[lastLevel] && isHigh;
+    lastAqi = aqi;
+    if (place) lastPlace = place;
     lastLevel = level;
-    if (changed && state.sign) showSign(level, statusText());
-    if (rose) announce(statusText(), 'severe');
+    if ((changed || placeChanged) && state.sign) showSign(level, statusText());
+    if (silent) return;
+    if (rose || (placeChanged && isHigh)) {
+      announce(statusText(), 'severe');
+    } else if (hadPrev && (placeChanged || changed)) {
+      // Speak aloud for Good, Satisfactory, Moderate, and Poor too — not only Very Poor/Severe
+      var msg = '';
+      try { msg = CONFIG.getSummary ? CONFIG.getSummary() : ''; } catch (e) { msg = ''; }
+      speak(msg || statusText());
+    }
   }
 
   /* --------------------------- sign-language panel ----------------------- */
+  var clipAvailCache = {};
+  function checkClipAvailable(url, cb) {
+    if (!url) { cb(false); return; }
+    if (Object.prototype.hasOwnProperty.call(clipAvailCache, url)) {
+      cb(clipAvailCache[url]);
+      return;
+    }
+    if (typeof fetch !== 'function') { cb(false); return; }
+    fetch(url, { method: 'HEAD' })
+      .then(function (res) {
+        var ct = (res.headers && res.headers.get('content-type')) || '';
+        var ok = !!(res.ok && (/^video\//i.test(ct) || /^application\/octet-stream/i.test(ct)));
+        clipAvailCache[url] = ok;
+        cb(ok);
+      })
+      .catch(function () {
+        clipAvailCache[url] = false;
+        cb(false);
+      });
+  }
+
+  function safePlayVideo() {
+    if (!els.video) return;
+    var hasSrc = !!(els.video.getAttribute('src') || els.video.currentSrc);
+    if (!hasSrc || els.video.style.display === 'none' || els.video.networkState === 3) {
+      if (lastLevel) showSign(lastLevel, statusText());
+      return;
+    }
+    try {
+      var p = els.video.play();
+      if (p && p.catch) p.catch(function () { /* ignore autoplay/source rejection */ });
+    } catch (e) { /* ignore */ }
+  }
+
   function buildSign() {
     els.sign = el('div', 'a11y-sign');
     els.sign.setAttribute('role', 'region');
@@ -365,10 +407,17 @@
     head.appendChild(els.signTag);
     els.video = document.createElement('video');
     els.video.setAttribute('playsinline', ''); els.video.loop = false;
+    els.video.style.display = 'none';
     els.signMsg = el('div'); els.signMsg.style.cssText = 'padding:6px 2px;min-height:40px';
     var bar = el('div', 'bar');
     var play = el('button', null, '▶/⏸'); play.setAttribute('aria-label', t('play') + ' / ' + t('pause'));
-    play.addEventListener('click', function () { if (els.video.paused) els.video.play(); else els.video.pause(); });
+    play.addEventListener('click', function () {
+      if (!els.video.getAttribute('src') || els.video.style.display === 'none') {
+        if (lastLevel) showSign(lastLevel, statusText());
+        return;
+      }
+      if (els.video.paused) safePlayVideo(); else els.video.pause();
+    });
     var spd = el('button', null, '1x'); spd.setAttribute('aria-label', t('speed'));
     spd.addEventListener('click', function () {
       signSpeedIdx = (signSpeedIdx + 1) % signSpeeds.length;
@@ -387,19 +436,29 @@
   function showSign(levelKey, caption) {
     if (!els.sign) return;
     seqId++;
+    var id = seqId;
     var url = levelKey && CONFIG.signClips[levelKey];
     var seq = levelKey && CONFIG.signSequences[levelKey];
     els.signMsg.textContent = caption || '';
     els.chips.innerHTML = '';
     els.video.onended = null; els.video.onerror = null;
     if (url) {
-      els.video.style.display = 'block';
-      if (els.video.getAttribute('src') !== url) els.video.src = url;
-      els.video.playbackRate = signSpeeds[signSpeedIdx];
-      var p = els.video.play(); if (p && p.catch) p.catch(function () { /* autoplay blocked: user taps play */ });
+      checkClipAvailable(url, function (ok) {
+        if (id !== seqId) return;
+        if (!ok) {
+          if (seq && seq.length) { playSequence(seq, caption, id); return; }
+          els.video.pause(); els.video.removeAttribute('src'); els.video.style.display = 'none';
+          els.signMsg.textContent = (caption ? caption + ' \u2014 ' : '') + t('noClip');
+          return;
+        }
+        els.video.style.display = 'block';
+        if (els.video.getAttribute('src') !== url) els.video.src = url;
+        els.video.playbackRate = signSpeeds[signSpeedIdx];
+        safePlayVideo();
+      });
       return;
     }
-    if (seq && seq.length) { playSequence(seq, caption, seqId); return; }
+    if (seq && seq.length) { playSequence(seq, caption, id); return; }
     els.video.pause(); els.video.removeAttribute('src'); els.video.style.display = 'none';
     els.signMsg.textContent = (caption ? caption + ' \u2014 ' : '') + t('noClip');
   }
@@ -425,12 +484,27 @@
       chips.forEach(function (c, j) { var on = j === cur; c.style.background = on ? '#f59e0b' : 'transparent'; c.style.color = on ? '#000' : '#fff'; });
       if (cur >= seq.length) return;
       var u = CONFIG.signWords[seq[cur]];
-      if (!u) { setTimeout(next, 1200); return; }
-      els.video.style.display = 'block';
-      els.video.onended = next; els.video.onerror = next;
-      els.video.src = u;
-      els.video.playbackRate = signSpeeds[signSpeedIdx];
-      var p = els.video.play(); if (p && p.catch) p.catch(function () { /* user taps play */ });
+      if (!u) { setTimeout(next, 1100); return; }
+      checkClipAvailable(u, function (ok) {
+        if (id !== seqId) return;
+        if (!ok) {
+          els.video.pause();
+          els.video.removeAttribute('src');
+          els.video.style.display = 'none';
+          setTimeout(next, 1100);
+          return;
+        }
+        els.video.style.display = 'block';
+        els.video.onended = next;
+        els.video.onerror = function () {
+          els.video.style.display = 'none';
+          els.video.removeAttribute('src');
+          setTimeout(next, 900);
+        };
+        els.video.src = u;
+        els.video.playbackRate = signSpeeds[signSpeedIdx];
+        safePlayVideo();
+      });
     }
     next();
   }
@@ -511,23 +585,42 @@
     return true;
   }
   function setCity(city) {
+    var cleanPlace = String(city || '').replace(/[.,!?]+$/, '').trim();
+    if (!cleanPlace) return false;
+    if (typeof CONFIG.onSelectPlace === 'function') {
+      var res = CONFIG.onSelectPlace(cleanPlace);
+      if (res && res.found) return res;
+    }
     var input = (CONFIG.selectors.searchInput && document.querySelector(CONFIG.selectors.searchInput)) ||
       document.querySelector('input[type=search]') ||
       Array.prototype.filter.call(document.querySelectorAll('input[type=text],input:not([type])'), function (i) { return /search|city|शहर|நகர/i.test(i.placeholder || ''); })[0];
     if (!input) return false;
     var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    setter.call(input, city.replace(/[.,!?]+$/, '').trim());
+    setter.call(input, cleanPlace);
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    var btn = CONFIG.selectors.searchButton && document.querySelector(CONFIG.selectors.searchButton);
-    if (btn) { btn.click(); return true; }
-    return clickByText(/^(find|search|खोज|தேடு)/i);
+    setTimeout(function () {
+      var btn = CONFIG.selectors.searchButton && document.querySelector(CONFIG.selectors.searchButton);
+      if (btn) { btn.click(); return; }
+      clickByText(/^(find|search|खोज|தேடு)/i);
+    }, 60);
+    return true;
   }
 
   function handleCommand(raw) {
     var text = (raw || '').trim();
     if (!text) { speak(t('notFound')); return; }
     var city = text.match(CITY_RE);
-    if (city && city[1]) { speak(t('opening') + ' ' + city[1]); if (!setCity(city[1])) speak(t('notFound')); return; }
+    if (city && city[1]) {
+      var result = setCity(city[1]);
+      if (result && typeof result === 'object' && result.summary) {
+        speak(result.summary);
+      } else if (result) {
+        speak(t('opening') + ' ' + city[1]);
+      } else {
+        speak(t('notFound'));
+      }
+      return;
+    }
     var id = matchIntent(text), ok = true;
     switch (id) {
       case 'stop': stopSpeak(); return;
@@ -575,7 +668,9 @@
     readPage: readPage,
     command: handleCommand,
     intent: matchIntent,
+    caption: showCaption,
     status: function () { return { aqi: lastAqi, place: lastPlace, level: lastLevel }; },
+    setOption: setOption,
     open: function () { togglePanel(true); },
     refresh: function () { renderPanel(); applyOptions(); }
   };
@@ -601,12 +696,22 @@
 
   var STR = {
     en: {
-      btn: 'Communication', title: 'Communication mode', type: 'Type a command', send: 'Send',
-      placeholder: 'e.g. read air quality, page 2, change city to Chennai',
-      quick: 'Quick actions', phrases: 'Phrase board', add: 'Add your own phrase', addBtn: 'Add',
+      btn: 'Communication', title: 'Communication mode', type: 'Type a question or command', send: 'Ask / Send',
+      placeholder: 'e.g. Is it safe outside?, Do I need a mask?, Air quality in Chennai',
+      questions: 'Tap a question for instant answer',
+      answerTitle: 'AirCast Answer',
+      quick: 'Quick actions', phrases: 'Phrase board (speak or show to others)', add: 'Add your own phrase', addBtn: 'Add',
       speak: 'Speak', show: 'Show', close: 'Close', tapClose: 'Tap anywhere to close',
       qRead: 'Air quality now', qForecast: 'Forecast', qAdvice: 'Health advice',
       qP1: 'Page 1', qP2: 'Page 2', qSim: 'Simulator', qPlan: 'Planner',
+      askAir: '🌬️ How is the air quality now?',
+      askSafe: '🚶 Is it safe to go outside?',
+      askMask: '😷 Do I need a mask?',
+      askBest: '⏰ Best time to go outside?',
+      askForecast: '📈 What is the 24h forecast?',
+      askWhy: '🔍 Why is pollution at this level?',
+      askHospital: '🏥 Nearest clean-air hospital?',
+      askWindow: '🪟 Should I close windows?',
       p1: 'I cannot speak. Please read this screen.',
       p2: 'I am deaf. Please write or type your message.',
       p3: 'I need medical help. Please call 108.',
@@ -614,12 +719,22 @@
       p5: 'Please help me find a clean-air hospital nearby.'
     },
     hi: {
-      btn: 'संवाद', title: 'संवाद मोड', type: 'कमांड टाइप करें', send: 'भेजें',
-      placeholder: 'जैसे: वायु गुणवत्ता पढ़ो, पेज 2, शहर बदलो चेन्नई',
-      quick: 'त्वरित क्रियाएं', phrases: 'वाक्य बोर्ड', add: 'अपना वाक्य जोड़ें', addBtn: 'जोड़ें',
+      btn: 'संवाद', title: 'संवाद मोड', type: 'सवाल या कमांड टाइप करें', send: 'पूछें / भेजें',
+      placeholder: 'जैसे: क्या बाहर जाना सुरक्षित है?, मास्क चाहिए?, चेन्नई की हवा कैसी है?',
+      questions: 'तुरंत उत्तर के लिए सवाल टैप करें',
+      answerTitle: 'AirCast उत्तर',
+      quick: 'त्वरित क्रियाएं', phrases: 'वाक्य बोर्ड (दूसरों को दिखाएं या बोलें)', add: 'अपना वाक्य जोड़ें', addBtn: 'जोड़ें',
       speak: 'बोलें', show: 'दिखाएं', close: 'बंद करें', tapClose: 'बंद करने के लिए कहीं भी टैप करें',
       qRead: 'अभी की वायु गुणवत्ता', qForecast: 'पूर्वानुमान', qAdvice: 'स्वास्थ्य सलाह',
       qP1: 'पेज 1', qP2: 'पेज 2', qSim: 'सिम्युलेटर', qPlan: 'योजना',
+      askAir: '🌬️ अभी की हवा कैसी है?',
+      askSafe: '🚶 क्या बाहर जाना सुरक्षित है?',
+      askMask: '😷 क्या मुझे मास्क पहनना चाहिए?',
+      askBest: '⏰ बाहर जाने का सबसे अच्छा समय?',
+      askForecast: '📈 24 घंटे का पूर्वानुमान क्या है?',
+      askWhy: '🔍 प्रदूषण का मुख्य कारण क्या है?',
+      askHospital: '🏥 नजदीकी साफ़-हवा अस्पताल?',
+      askWindow: '🪟 क्या खिड़कियां बंद रखनी चाहिए?',
       p1: 'मैं बोल नहीं सकता/सकती। कृपया यह स्क्रीन पढ़ें।',
       p2: 'मैं सुन नहीं सकता/सकती। कृपया लिखकर बताएं।',
       p3: 'मुझे चिकित्सा सहायता चाहिए। कृपया 108 पर कॉल करें।',
@@ -627,12 +742,22 @@
       p5: 'कृपया पास में साफ़ हवा वाला अस्पताल खोजने में मदद करें।'
     },
     ta: {
-      btn: 'தொடர்பு', title: 'தொடர்பு பயன்முறை', type: 'கட்டளையை தட்டச்சு செய்யுங்கள்', send: 'அனுப்பு',
-      placeholder: 'எ.கா: காற்றின் தரத்தைப் படி, பக்கம் 2, நகரம் சென்னை',
+      btn: 'தொடர்பு', title: 'தொடர்பு பயன்முறை', type: 'கேள்வி அல்லது கட்டளையை தட்டச்சு செய்யுங்கள்', send: 'கேள் / அனுப்பு',
+      placeholder: 'எ.கா: வெளியே செல்வது பாதுகாப்பானதா?, முகக்கவசம் வேண்டுமா?, சென்னை காற்று',
+      questions: 'உடனடி பதிலுக்கு கேள்வியைத் தொடவும்',
+      answerTitle: 'AirCast பதில்',
       quick: 'விரைவு செயல்கள்', phrases: 'சொற்றொடர் பலகை', add: 'உங்கள் சொற்றொடரைச் சேர்க்கவும்', addBtn: 'சேர்',
       speak: 'பேசு', show: 'காட்டு', close: 'மூடு', tapClose: 'மூட எங்கும் தொடவும்',
       qRead: 'இப்போதைய காற்றுத் தரம்', qForecast: 'முன்னறிவிப்பு', qAdvice: 'சுகாதார ஆலோசனை',
       qP1: 'பக்கம் 1', qP2: 'பக்கம் 2', qSim: 'சிமுலேட்டர்', qPlan: 'திட்டம்',
+      askAir: '🌬️ இப்போதைய காற்றுத் தரம் எப்படி?',
+      askSafe: '🚶 வெளியே செல்வது பாதுகாப்பானதா?',
+      askMask: '😷 எனக்கு முகக்கவசம் வேண்டுமா?',
+      askBest: '⏰ வெளியே செல்ல சிறந்த நேரம் எது?',
+      askForecast: '📈 24 மணி நேர முன்னறிவிப்பு என்ன?',
+      askWhy: '🔍 மாசுபாட்டிற்கு முக்கிய காரணம் என்ன?',
+      askHospital: '🏥 அருகிலுள்ள தூய காற்று மருத்துவமனை?',
+      askWindow: '🪟 ஜன்னல்களை மூட வேண்டுமா?',
       p1: 'என்னால் பேச முடியாது. தயவுசெய்து இந்தத் திரையைப் படிக்கவும்.',
       p2: 'எனக்குக் காது கேட்காது. தயவுசெய்து எழுதிக் காட்டவும்.',
       p3: 'எனக்கு மருத்துவ உதவி தேவை. தயவுசெய்து 108 ஐ அழைக்கவும்.',
@@ -640,6 +765,17 @@
       p5: 'அருகில் தூய காற்று உள்ள மருத்துவமனையைக் கண்டுபிடிக்க உதவவும்.'
     }
   };
+  // One-tap Q&A items: [labelKey, querySentToAssistant]
+  var QUESTIONS = [
+    ['askAir', 'how is the air quality now'],
+    ['askSafe', 'is it safe to go outside'],
+    ['askMask', 'do I need a mask'],
+    ['askBest', 'what is the best time to go outside'],
+    ['askForecast', 'what is the forecast'],
+    ['askWhy', 'why is the air pollution high'],
+    ['askHospital', 'nearest clean air hospital'],
+    ['askWindow', 'should I close windows']
+  ];
   // Quick-action commands are sent in English keywords the voice handler understands.
   var QUICK = [
     ['qRead', 'read air quality'], ['qForecast', 'forecast'], ['qAdvice', 'health advice'],
@@ -670,6 +806,11 @@
       '.cm-btn{min-height:44px;padding:8px 12px;border-radius:10px;border:2px solid #0f172a;background:#fff;color:#0f172a;font-weight:700;cursor:pointer}',
       '.cm-btn.pri{background:#1d4ed8;color:#fff;border-color:#1d4ed8}',
       '.cm-chips{display:flex;flex-wrap:wrap;gap:8px}',
+      '.cm-qbtn{min-height:44px;padding:8px 12px;border-radius:10px;border:2px solid #1d4ed8;background:#eff6ff;color:#0f172a;font-weight:700;cursor:pointer;text-align:left}',
+      '.cm-qbtn:hover{background:#dbeafe}',
+      '.cm-answer{margin-top:12px;padding:12px 14px;border-radius:12px;border:2px solid #0f766e;background:#f0fdfa;color:#0f172a}',
+      '.cm-answer-q{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:#0f766e;margin:0 0 4px}',
+      '.cm-answer-a{font-size:16px;font-weight:700;line-height:1.45;margin:0 0 10px;color:#0f172a}',
       '.cm-phrase{border:2px solid #cbd5e1;border-radius:12px;padding:10px;margin-bottom:8px}',
       '.cm-phrase p{margin:0 0 8px;font-weight:600}',
       '.cm-full{position:fixed;inset:0;z-index:100001;background:#000;color:#fff;display:none;align-items:center;justify-content:center;text-align:center;padding:24px;font:700 clamp(28px,9vw,56px)/1.25 system-ui,sans-serif;cursor:pointer;flex-direction:column}',
@@ -678,14 +819,44 @@
     document.head.appendChild(s);
   }
 
-  var fab, sheet, full, fullText, fullHint;
+  var fab, sheet, full, fullText, fullHint, lastQA = null;
 
   function showFull(text) {
     fullText.textContent = text; fullHint.textContent = t('tapClose');
     full.style.display = 'flex';
   }
-  function say(text) { var a = api(); if (a && a.speak) a.speak(text); }
+  function say(text) { var a = api(); if (a && a.speak) a.speak(text, true); }
   function cmd(text) { var a = api(); if (a && a.command) a.command(text); }
+
+  function resolveAnswer(displayQuestion, query) {
+    var q = (query || displayQuestion || '').trim();
+    if (!q) return;
+    // Navigation commands still navigate & also confirm in the answer box
+    if (/^(?:page ?1|page ?2|simulator|planner|पेज|पக்கம்|सिम्युलेटर|சிமுலேட்டர்|योजना|திட்டம்)/i.test(q)) {
+      cmd(q);
+      lastQA = { q: displayQuestion || q, a: 'Opened: ' + q };
+      render();
+      return;
+    }
+    var ans = '';
+    if (window.AirCastAssistant && typeof window.AirCastAssistant.getAnswer === 'function') {
+      ans = window.AirCastAssistant.getAnswer(q) || '';
+    }
+    if (!ans) {
+      var a = api();
+      if (a && a.status) {
+        var st = a.status();
+        ans = (st.place ? st.place + ': ' : '') + (st.aqi != null ? 'AQI ' + st.aqi + ' (' + (st.level || '') + ').' : '');
+      }
+    }
+    if (ans) {
+      lastQA = { q: displayQuestion || q, a: ans };
+      render();
+      say(ans);
+    } else {
+      cmd(q);
+    }
+  }
 
   function render() {
     fab.setAttribute('aria-label', t('btn'));
@@ -693,55 +864,63 @@
     sheet.innerHTML = '';
     sheet.appendChild(el('h2', null, t('title')));
 
-    // 1) type a command
+    // 1) type a question or command
     sheet.appendChild(el('h3', null, t('type')));
     var row = el('div', 'cm-row');
     var input = document.createElement('input');
     input.type = 'text'; input.placeholder = t('placeholder'); input.setAttribute('aria-label', t('type'));
     var send = el('button', 'cm-btn pri', t('send'));
-    function go() { var v = input.value.trim(); if (v) { cmd(v); input.value = ''; } }
+    function go() { var v = input.value.trim(); if (v) { input.value = ''; resolveAnswer(v, v); } }
     send.addEventListener('click', go);
     input.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
     row.appendChild(input); row.appendChild(send);
     sheet.appendChild(row);
 
-    // 2) quick actions
+    // Live Answer Box (shown whenever a question is asked or tapped)
+    if (lastQA && lastQA.a) {
+      var ansBox = el('div', 'cm-answer');
+      ansBox.setAttribute('role', 'status');
+      ansBox.setAttribute('aria-live', 'polite');
+      ansBox.appendChild(el('div', 'cm-answer-q', t('answerTitle') + ' — ' + lastQA.q));
+      ansBox.appendChild(el('p', 'cm-answer-a', lastQA.a));
+      var ansBtns = el('div', 'cm-row');
+      var spA = el('button', 'cm-btn', '🔊 ' + t('speak'));
+      spA.addEventListener('click', function () { say(lastQA.a); });
+      var shA = el('button', 'cm-btn pri', '🖥 ' + t('show'));
+      shA.addEventListener('click', function () { showFull(lastQA.a); });
+      ansBtns.appendChild(spA); ansBtns.appendChild(shA);
+      ansBox.appendChild(ansBtns);
+      sheet.appendChild(ansBox);
+    }
+
+    // 2) One-tap Questions with Instant Answers
+    sheet.appendChild(el('h3', null, t('questions')));
+    var qChips = el('div', 'cm-chips');
+    QUESTIONS.forEach(function (item) {
+      var label = t(item[0]);
+      var b = el('button', 'cm-qbtn', label);
+      b.addEventListener('click', function () { resolveAnswer(label, item[1]); });
+      qChips.appendChild(b);
+    });
+    sheet.appendChild(qChips);
+
+    // 3) quick actions
     sheet.appendChild(el('h3', null, t('quick')));
     var chips = el('div', 'cm-chips');
     QUICK.forEach(function (q) {
       var b = el('button', 'cm-btn', t(q[0]));
-      b.addEventListener('click', function () { cmd(q[1]); toggle(false); });
+      b.addEventListener('click', function () {
+        if (q[1] === 'read air quality' || q[1] === 'forecast' || q[1] === 'health advice') {
+          var mapped = q[1] === 'read air quality' ? 'how is the air quality now' : (q[1] === 'forecast' ? 'what is the forecast' : 'is it safe to go outside');
+          resolveAnswer(t(q[0]), mapped);
+        } else {
+          cmd(q[1]);
+          toggle(false);
+        }
+      });
       chips.appendChild(b);
     });
     sheet.appendChild(chips);
-
-    // 3) phrase board
-    sheet.appendChild(el('h3', null, t('phrases')));
-    var list = ['p1', 'p2', 'p3', 'p4', 'p5'].map(function (k) { return t(k); }).concat(custom());
-    list.forEach(function (text) {
-      var box = el('div', 'cm-phrase');
-      box.appendChild(el('p', null, text));
-      var r = el('div', 'cm-row');
-      var sp = el('button', 'cm-btn', '🔊 ' + t('speak'));
-      sp.addEventListener('click', function () { say(text); });
-      var sh = el('button', 'cm-btn pri', '🖥 ' + t('show'));
-      sh.addEventListener('click', function () { showFull(text); });
-      r.appendChild(sp); r.appendChild(sh);
-      box.appendChild(r);
-      sheet.appendChild(box);
-    });
-
-    // 4) add own phrase
-    sheet.appendChild(el('h3', null, t('add')));
-    var ar = el('div', 'cm-row');
-    var ai = document.createElement('input'); ai.type = 'text'; ai.setAttribute('aria-label', t('add'));
-    var ab = el('button', 'cm-btn', t('addBtn'));
-    ab.addEventListener('click', function () {
-      var v = ai.value.trim(); if (!v) return;
-      var c = custom(); c.push(v); saveCustom(c); render();
-    });
-    ar.appendChild(ai); ar.appendChild(ab);
-    sheet.appendChild(ar);
 
     var close = el('button', 'cm-btn', t('close'));
     close.style.marginTop = '12px';
@@ -931,24 +1110,23 @@
 })();
 
 /*!
- * AirCast Voice Assistant ("Hey AirCast")
- * For blind and low-vision users: say "Hey AirCast", ask a question, hear the answer.
+ * AirCast Voice Assistant (wake word: just "AirCast", no button)
+ * For blind and low-vision users (and anyone who prefers talking).
  *
- * HOW IT WORKS
- *  1. User taps the 🎙 button once (browsers require a tap before the mic or speech can start).
- *  2. It listens continuously for the wake phrase "Hey AirCast" (also "Hi/OK AirCast", Hindi and Tamil forms).
- *  3. After the wake phrase it beeps, listens, then:
- *       - short navigation commands ("page 2", "simulator", "planner", "change city to Chennai") -> handled by aircast-accessibility.js
- *       - everything else -> answered by the BUILT-IN answer engine below (no external AI, no API key).
- *         (Optional: AirCastAssistant.configure({ ask }) can still plug in any AI later.)
- *  4. Emergency phrases ("chest pain", "can't breathe"...) skip the AI and say "Call 108" immediately.
+ * FLOW
+ *  1. When the site opens it greets: "Good morning! Have a nice day. I am AirCast. Tell me what you want."
+ *     (Browsers block sound until the visitor touches the page once. If so, the greeting plays on the first
+ *     tap, key press or screen-reader touch.)
+ *  2. It listens for a few seconds. If the visitor says anything, it answers. After each answer it listens again.
+ *  3. If nobody speaks, it goes to standby: it only listens for the word "AirCast" to wake up again.
+ *  4. Saying "stop listening" or "goodbye" turns it fully off. After 10 quiet minutes it also turns off to save
+ *     battery. Tapping the screen once turns it back on.
+ *  There is NO mic button. Answers come from a built-in engine (no external AI, no API key).
  *
- * LIMITS (be honest in your demo)
- *  - Works only while the page is open and the screen is on (not a background assistant like Siri).
- *  - Uses the browser's speech service (Chrome/Edge work best). Wake-word detection can mishear.
- *  - Load AFTER aircast-accessibility.js.
+ * LIMITS: works only while the page is open and visible; uses the browser speech service (Chrome/Edge best).
+ * Load AFTER aircast-accessibility.js.
  *
- * FEED IT YOUR LIVE DATA (any of these; AirCastA11y.setAqi(aqi, city) alone is enough for basic answers):
+ * FEED IT YOUR LIVE DATA (AirCastA11y.setAqi(aqi, city) alone is enough for basic answers):
  *   AirCastAssistant.configure({
  *     getContext: () => ({ city:'Coimbatore', aqi:73, category:'Satisfactory', pm25:40.8,
  *       bestHour:'12:00', worstHour:'22:00', forecast:'Air improves after noon.',
@@ -962,60 +1140,190 @@
   var CFG = {
     ask: null,
     getContext: null,
+    getLang: null,
+    setLanguage: null,
+    onSelectPlace: null,
     idleMinutes: 10,
-    wake: /(?:hey|hi|ok|okay|hello|हे|हेलो|ஹே|ஹலோ)[\s,.\-]*(?:air[\s\-]*cast|aircast|air cost|एयर[\s\-]*कास्ट|ஏர்[\s\-]*காஸ்ட்)/i
+    activeSeconds: 8, greetDelayMs: 800, showStatus: true, greet: true,
+    wake: /(?:\b(?:air|ayr|aer|eyr)[\s\-]*(?:cast|cost|cas)\b|एयर[\s\-]*कास्ट|ஏர்[\s\-]*காஸ்ட்|ఎయిర్[\s\-]*కాస్ట్|ಏರ್[\s\-]*ಕಾಸ್ಟ್|എയർ[\s\-]*കാസ്റ്റ്)/i
   };
   var LOCALES = { en: 'en-IN', hi: 'hi-IN', ta: 'ta-IN', te: 'te-IN', kn: 'kn-IN', ml: 'ml-IN', bn: 'bn-IN', mr: 'mr-IN', gu: 'gu-IN', pa: 'pa-IN', ur: 'ur-IN' };
   var STR = {
     en: {
-      btn: 'Hey AirCast voice assistant',
-      on: 'Hey AirCast is on. Say Hey AirCast, then ask me anything about the air. Say stop to quiet me.',
-      disclosure: 'Note: your browser speech service hears you, and your questions are sent to an AI to answer. This is general information, not medical advice.',
-      off: 'Hey AirCast is off.', unsupported: 'Voice is not supported in this browser. Please use Chrome.',
+      btn: 'AirCast voice assistant',
+      on: 'AirCast is on. Say AirCast, then ask me anything about the air. Say stop to quiet me.',
+      disclosure: 'Note: your browser speech service hears you. This is general information, not medical advice.',
+      off: 'AirCast is off.', unsupported: 'Voice is not supported in this browser. Please use Chrome.',
       denied: 'Microphone access was blocked. Please allow the microphone and try again.',
-      noAi: 'The AI helper is not connected yet.', error: 'Sorry, I could not answer that. Please try again.',
-      paused: 'Hey AirCast is paused to save battery. Tap the microphone button to resume.',
+      noAi: 'The helper is not connected yet.', error: 'Sorry, I could not answer that. Please try again.',
+      paused: 'AirCast is paused to save battery. Tap anywhere to wake me.',
       emergency: 'This may be an emergency. Call 108 now, or ask someone nearby to call. Do not wait for the app.',
-      stOff: 'Hey AirCast: off', stWait: 'Say “Hey AirCast”', stListen: 'Listening…', stThink: 'Thinking…', stSpeak: 'Speaking…'
+      stOff: 'AirCast: off', stWait: 'Say “AirCast”', stListen: 'Listening…', stThink: 'Thinking…', stSpeak: 'Speaking…',
+      gm: 'Good morning', ga: 'Good afternoon', ge: 'Good evening', gn: 'Hello',
+      nice: 'Have a nice day.', nice2: 'Have a nice evening.', iam: 'I am AirCast.', tell: 'Tell me what you want.',
+      intro: 'I listen for my name, AirCast, using your browser speech service. Say stop listening to turn me off.',
+      langSwitched: 'Switched language to English.',
+      opening: 'Opening',
+      placeSwitched: 'Switched to',
+      placeNotFound: 'Sorry, I could not find that country, state, or city. Please try saying another location.'
     },
     hi: {
-      btn: 'हे एयरकास्ट आवाज़ सहायक',
-      on: 'हे एयरकास्ट चालू है। हे एयरकास्ट कहें, फिर हवा के बारे में कुछ भी पूछें। चुप कराने के लिए रुको कहें।',
-      disclosure: 'ध्यान दें: आपकी आवाज़ ब्राउज़र की स्पीच सेवा सुनती है और आपके सवाल जवाब के लिए एआई को भेजे जाते हैं। यह सामान्य जानकारी है, चिकित्सा सलाह नहीं।',
-      off: 'हे एयरकास्ट बंद है।', unsupported: 'इस ब्राउज़र में आवाज़ समर्थित नहीं है। कृपया क्रोम इस्तेमाल करें।',
+      btn: 'एयरकास्ट आवाज़ सहायक',
+      on: 'एयरकास्ट चालू है। एयरकास्ट कहें, फिर हवा के बारे में कुछ भी पूछें। चुप कराने के लिए रुको कहें।',
+      disclosure: 'ध्यान दें: आपकी आवाज़ ब्राउज़र की स्पीच सेवा सुनती है। यह सामान्य जानकारी है, चिकित्सा सलाह नहीं।',
+      off: 'एयरकास्ट बंद है।', unsupported: 'इस ब्राउज़र में आवाज़ समर्थित नहीं है। कृपया क्रोम इस्तेमाल करें।',
       denied: 'माइक्रोफ़ोन की अनुमति नहीं मिली। कृपया अनुमति दें और फिर कोशिश करें।',
-      noAi: 'एआई सहायक अभी जुड़ा नहीं है।', error: 'क्षमा करें, मैं जवाब नहीं दे सका। कृपया फिर कोशिश करें।',
-      paused: 'बैटरी बचाने के लिए हे एयरकास्ट रुका है। फिर शुरू करने के लिए माइक्रोफ़ोन बटन दबाएं।',
-      emergency: 'यह आपातकाल हो सकता है। अभी 108 पर कॉल करें, या पास के किसी व्यक्ति से कॉल करवाएं। ऐप का इंतज़ार न करें।'
+      noAi: 'सहायक अभी जुड़ा नहीं है।', error: 'क्षमा करें, मैं जवाब नहीं दे सका। कृपया फिर कोशिश करें।',
+      paused: 'बैटरी बचाने के लिए एयरकास्ट रुका है। जगाने के लिए कहीं भी टैप करें।',
+      emergency: 'यह आपातकाल हो सकता है। अभी 108 पर कॉल करें, या पास के किसी व्यक्ति से कॉल करवाएं। ऐप का इंतज़ार न करें।',
+      gm: 'सुप्रभात', ga: 'नमस्कार', ge: 'शुभ संध्या', gn: 'नमस्कार',
+      nice: 'आपका दिन शुभ हो।', nice2: 'आपकी शाम शुभ हो।', iam: 'मैं एयरकास्ट हूँ।', tell: 'बताइए, आपको क्या चाहिए?',
+      intro: 'मैं अपना नाम, एयरकास्ट, सुनने के लिए आपके ब्राउज़र की स्पीच सेवा इस्तेमाल करता हूँ। मुझे बंद करने के लिए सुनना बंद करो कहें।',
+      langSwitched: 'भाषा हिंदी में बदल दी गई है।',
+      opening: 'खोल रहा हूँ',
+      placeSwitched: 'स्थान बदल दिया:',
+      placeNotFound: 'क्षमा करें, वह देश, राज्य या शहर नहीं मिला। कृपया कोई दूसरा स्थान बोलें।'
     },
     ta: {
-      btn: 'ஹே ஏர்காஸ்ட் குரல் உதவியாளர்',
-      on: 'ஹே ஏர்காஸ்ட் இயக்கத்தில் உள்ளது. ஹே ஏர்காஸ்ட் என்று சொல்லி, காற்றைப் பற்றி எதுவும் கேளுங்கள். என்னை நிறுத்த நிறுத்து என்று சொல்லுங்கள்.',
-      disclosure: 'கவனிக்கவும்: உங்கள் உலாவியின் பேச்சு சேவை உங்களைக் கேட்கும், உங்கள் கேள்விகள் பதிலுக்காக AI-க்கு அனுப்பப்படும். இது பொதுத் தகவல், மருத்துவ ஆலோசனை அல்ல.',
-      off: 'ஹே ஏர்காஸ்ட் அணைக்கப்பட்டது.', unsupported: 'இந்த உலாவியில் குரல் ஆதரிக்கப்படவில்லை. குரோம் பயன்படுத்தவும்.',
+      btn: 'ஏர்காஸ்ட் குரல் உதவியாளர்',
+      on: 'ஏர்காஸ்ட் இயக்கத்தில் உள்ளது. ஏர்காஸ்ட் என்று சொல்லி, காற்றைப் பற்றி எதுவும் கேளுங்கள். என்னை நிறுத்த நிறுத்து என்று சொல்லுங்கள்.',
+      disclosure: 'கவனிக்கவும்: உங்கள் உலாவியின் பேச்சு சேவை உங்களைக் கேட்கும். இது பொதுத் தகவல், மருத்துவ ஆலோசனை அல்ல.',
+      off: 'ஏர்காஸ்ட் அணைக்கப்பட்டது.', unsupported: 'இந்த உலாவியில் குரல் ஆதரிக்கப்படவில்லை. குரோம் பயன்படுத்தவும்.',
       denied: 'மைக்ரோஃபோன் அனுமதி மறுக்கப்பட்டது. அனுமதி அளித்து மீண்டும் முயலவும்.',
-      noAi: 'AI உதவியாளர் இன்னும் இணைக்கப்படவில்லை.', error: 'மன்னிக்கவும், பதில் அளிக்க முடியவில்லை. மீண்டும் முயலவும்.',
-      paused: 'பேட்டரியைச் சேமிக்க ஹே ஏர்காஸ்ட் நிறுத்தப்பட்டது. தொடர மைக்ரோஃபோன் பொத்தானைத் தட்டவும்.',
-      emergency: 'இது அவசரநிலையாக இருக்கலாம். இப்போதே 108 ஐ அழைக்கவும், அல்லது அருகிலுள்ளவரை அழைக்கச் சொல்லுங்கள். செயலிக்காகக் காத்திருக்க வேண்டாம்.'
+      noAi: 'உதவியாளர் இன்னும் இணைக்கப்படவில்லை.', error: 'மன்னிக்கவும், பதில் அளிக்க முடியவில்லை. மீண்டும் முயலவும்.',
+      paused: 'பேட்டரியைச் சேமிக்க ஏர்காஸ்ட் நிறுத்தப்பட்டது. என்னை எழுப்ப எங்கும் தொடவும்.',
+      emergency: 'இது அவசரநிலையாக இருக்கலாம். இப்போதே 108 ஐ அழைக்கவும், அல்லது அருகிலுள்ளவரை அழைக்கச் சொல்லுங்கள். செயலிக்காகக் காத்திருக்க வேண்டாம்.',
+      gm: 'காலை வணக்கம்', ga: 'மதிய வணக்கம்', ge: 'மாலை வணக்கம்', gn: 'வணக்கம்',
+      nice: 'இனிய நாளாக அமையட்டும்.', nice2: 'இனிய மாலையாக அமையட்டும்.', iam: 'நான் ஏர்காஸ்ட்.', tell: 'உங்களுக்கு என்ன வேண்டும் என்று சொல்லுங்கள்.',
+      intro: 'என் பெயரான ஏர்காஸ்டைக் கேட்க உங்கள் உலாவியின் பேச்சு சேவையைப் பயன்படுத்துகிறேன். என்னை நிறுத்த கேட்பதை நிறுத்து என்று சொல்லுங்கள்.',
+      langSwitched: 'மொழி தமிழுக்கு மாற்றப்பட்டது.',
+      opening: 'திறக்கிறது',
+      placeSwitched: 'மாற்றப்பட்டது:',
+      placeNotFound: 'மன்னிக்கவும், அந்த நாடு, மாநிலம் அல்லது நகரத்தைக் கண்டுபிடிக்க முடியவில்லை. வேறு இடத்தைச் சொல்லுங்கள்.'
+    },
+    te: {
+      btn: 'ఎయిర్‌కాస్ట్ వాయిస్ అసిస్టెంట్',
+      on: 'ఎయిర్‌కాస్ట్ ఆన్‌లో ఉంది. ఎయిర్‌కాస్ట్ అని చెప్పి గాలి నాణ్యత గురించి అడగండి. ఆపడానికి ఆపు అని చెప్పండి.',
+      disclosure: 'గమనిక: మీ బ్రౌజర్ స్పీచ్ సేవ మిమ్మల్ని వింటుంది. ఇది సాధారణ సమాచారం మాత్రమే, వైద్య సలహా కాదు.',
+      off: 'ఎయిర్‌కాస్ట్ ఆఫ్‌లో ఉంది.', unsupported: 'ఈ బ్రౌజర్‌లో వాయిస్ సపోర్ట్ లేదు. దయచేసి క్రోమ్ వాడండి.',
+      denied: 'మైక్రోఫోన్ అనుమతి నిరాకరించబడింది. దయచేసి అనుమతి ఇచ్చి మళ్లీ ప్రయత్నించండి.',
+      noAi: 'సహాయకుడు ఇంకా కనెక్ట్ కాలేదు.', error: 'క్షమించండి, సమాధానం చెప్పలేకపోయాను. మళ్లీ ప్రయత్నించండి.',
+      paused: 'బ్యాటరీని ఆదా చేయడానికి ఎయిర్‌కాస్ట్ ఆగింది. లేపడానికి ఎక్కడైనా ట్యాప్ చేయండి.',
+      emergency: 'ఇది అత్యవసర పరిస్థితి కావచ్చు. వెంటనే 108కి కాల్ చేయండి.',
+      gm: 'శుభోదయం', ga: 'శుభ మధ్యాహ్నం', ge: 'శుభ సాయంత్రం', gn: 'నమస్కారం',
+      nice: 'మీ రోజు శుభప్రదంగా ఉండాలి.', nice2: 'మీ సాయంత్రం శుభప్రదంగా ఉండాలి.', iam: 'నేను ఎయిర్‌కాస్ట్.', tell: 'మీకు ఏమి కావాలో చెప్పండి.',
+      intro: 'నా పేరు ఎయిర్‌కాస్ట్ వినడానికి మీ బ్రౌజర్ స్పీచ్ సేవను ఉపయోగిస్తాను. ఆపడానికి వినడం ఆపు అని చెప్పండి.',
+      langSwitched: 'భాష తెలుగులోకి మార్చబడింది.',
+      opening: 'తెరుస్తోంది',
+      placeSwitched: 'మార్చబడింది:',
+      placeNotFound: 'క్షమించండి, ఆ దేశం, రాష్ట్రం లేదా నగరం కనుగొనబడలేదు. దయచేసి మరో ప్రదేశం చెప్పండి.'
+    },
+    kn: {
+      btn: 'ಏರ್‌ಕಾಸ್ಟ್ ಧ್ವನಿ ಸಹಾಯಕ',
+      on: 'ಏರ್‌ಕಾಸ್ಟ್ ಆನ್ ಆಗಿದೆ. ಏರ್‌ಕಾಸ್ಟ್ ಎಂದು ಹೇಳಿ ಗಾಳಿಯ ಗುಣಮಟ್ಟದ ಬಗ್ಗೆ ಕೇಳಿ. ನಿಲ್ಲಿಸಲು ನಿಲ್ಲಿಸು ಎಂದು ಹೇಳಿ.',
+      disclosure: 'ಸೂಚನೆ: ನಿಮ್ಮ ಬ್ರೌಸರ್ ಧ್ವನಿ ಸೇವೆ ನಿಮ್ಮನ್ನು ಕೇಳುತ್ತದೆ. ಇದು ಸಾಮಾನ್ಯ ಮಾಹಿತಿ, ವೈದ್ಯಕೀಯ ಸಲಹೆಯಲ್ಲ.',
+      off: 'ಏರ್‌ಕಾಸ್ಟ್ ಆಫ್ ಆಗಿದೆ.', unsupported: 'ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಧ್ವನಿ ಬೆಂಬಲವಿಲ್ಲ. ದಯವಿಟ್ಟು ಕ್ರೋಮ್ ಬಳಸಿ.',
+      denied: 'ಮೈಕ್ರೋಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ದಯವಿಟ್ಟು ಅನುಮತಿ ನೀಡಿ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
+      noAi: 'ಸಹಾಯಕ ಇನ್ನೂ ಸಂಪರ್ಕಗೊಂಡಿಲ್ಲ.', error: 'ಕ್ಷಮಿಸಿ, ಉತ್ತರಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
+      paused: 'ಬ್ಯಾಟರಿ ಉಳಿಸಲು ಏರ್‌ಕಾಸ್ಟ್ ವಿರಾಮದಲ್ಲಿದೆ. ಎಬ್ಬಿಸಲು ಎಲ್ಲಿಯಾದರೂ ಟ್ಯಾಪ್ ಮಾಡಿ.',
+      emergency: 'ಇದು ತುರ್ತು ಪರಿಸ್ಥಿತಿಯಾಗಿರಬಹುದು. ತಕ್ಷಣ 108ಕ್ಕೆ ಕರೆ ಮಾಡಿ.',
+      gm: 'ಶುಭೋದಯ', ga: 'ಶುಭ ಮಧ್ಯಾಹ್ನ', ge: 'ಶುಭ ಸಂಜೆ', gn: 'ನಮಸ್ಕಾರ',
+      nice: 'ನಿಮ್ಮ ದಿನ ಶುಭವಾಗಲಿ.', nice2: 'ನಿಮ್ಮ ಸಂಜೆ ಶುಭವಾಗಲಿ.', iam: 'ನಾನು ಏರ್‌ಕಾಸ್ಟ್.', tell: 'ನಿಮಗೆ ಏನು ಬೇಕು ಎಂದು ಹೇಳಿ.',
+      intro: 'ನನ್ನ ಹೆಸರು ಏರ್‌ಕಾಸ್ಟ್ ಕೇಳಲು ನಿಮ್ಮ ಬ್ರೌಸರ್ ಧ್ವನಿ ಸೇವೆಯನ್ನು ಬಳಸುತ್ತೇನೆ.',
+      langSwitched: 'ಭಾಷೆಯನ್ನು ಕನ್ನಡಕ್ಕೆ ಬದಲಾಯಿಸಲಾಗಿದೆ.',
+      opening: 'ತೆರೆಯುತ್ತಿದೆ',
+      placeSwitched: 'ಬದಲಾಯಿಸಲಾಗಿದೆ:',
+      placeNotFound: 'ಕ್ಷಮಿಸಿ, ಆ ದೇಶ, ರಾಜ್ಯ ಅಥವಾ ನಗರ ಕಂಡುಬಂದಿಲ್ಲ. ದಯವಿಟ್ಟು ಬೇರೆ ಸ್ಥಳವನ್ನು ಹೇಳಿ.'
+    },
+    ml: {
+      btn: 'എയർകാസ്റ്റ് വോയ്‌സ് അസിസ്റ്റന്റ്',
+      on: 'എയർകാസ്റ്റ് ഓണാണ്. എയർകാസ്റ്റ് എന്ന് പറഞ്ഞ് വായു ഗുണനിലവാരത്തെക്കുറിച്ച് ചോദിക്കുക. നിർത്താൻ നിർത്തുക എന്ന് പറയുക.',
+      disclosure: 'കുറിപ്പ്: നിങ്ങളുടെ ബ്രൗസർ സ്പീച്ച് സേവനം നിങ്ങളെ കേൾക്കും. ഇത് പൊതുവായ വിവരമാണ്, വൈദ്യോപദേശമല്ല.',
+      off: 'എയർകാസ്റ്റ് ഓഫാണ്.', unsupported: 'ഈ ബ്രൗസറിൽ വോയ്‌സ് പിന്തുണയില്ല. ദയവായി ക്രോം ഉപയോഗിക്കുക.',
+      denied: 'മൈക്രോഫോൺ അനുമതി നിഷേധിച്ചു. അനുമതി നൽകി വീണ്ടും ശ്രമിക്കുക.',
+      noAi: 'സഹായി ഇതുവരെ കണക്റ്റ് ചെയ്തിട്ടില്ല.', error: 'ക്ഷമിക്കണം, ഉത്തരം നൽകാൻ കഴിഞ്ഞില്ല. വീണ്ടും ശ്രമിക്കുക.',
+      paused: 'ബാറ്ററി ലാഭിക്കാൻ എയർകാസ്റ്റ് താൽക്കാലികമായി നിർത്തി. ഉണർത്താൻ എവിടെയെങ്കിലും ടാപ്പ് ചെയ്യുക.',
+      emergency: 'ഇതൊരു അടിയന്തര സാഹചര്യമായിരിക്കാം. ഉടൻ 108-ൽ വിളിക്കുക.',
+      gm: 'സുപ്രഭാതം', ga: 'ശുഭ ഉച്ചയ്ക്ക്', ge: 'ശുഭ സായാഹ്നം', gn: 'നമസ്കാരം',
+      nice: 'ശുഭദിനം ആശംസിക്കുന്നു.', nice2: 'ശുഭ സായാഹ്നം ആശംസിക്കുന്നു.', iam: 'ഞാൻ എയർകാസ്റ്റ് ആണ്.', tell: 'നിങ്ങൾക്ക് എന്താണ് വേണ്ടതെന്ന് പറയൂ.',
+      intro: 'എന്റെ പേരായ എയർകാസ്റ്റ് കേൾക്കാൻ നിങ്ങളുടെ ബ്രൗസർ സ്പീച്ച് സേവനം ഉപയോഗിക്കുന്നു.',
+      langSwitched: 'ഭാഷ മലയാളത്തിലേക്ക് മാറ്റി.',
+      opening: 'തുറക്കുന്നു',
+      placeSwitched: 'മാറ്റി:',
+      placeNotFound: 'ക്ഷമിക്കണം, ആ രാജ്യം, സംസ്ഥാനം അല്ലെങ്കിൽ നഗരം കണ്ടെത്താനായില്ല. ദയവായി മറ്റൊരു സ്ഥലം പറയൂ.'
     }
   };
-  var EMERGENCY = /can'?t breathe|cannot breathe|difficulty breathing|trouble breathing|chest pain|heart attack|faint(?:ed|ing)?|unconscious|passed out|choking|asthma attack|सांस नहीं|सांस लेने में तकलीफ|सीने में दर्द|बेहोश|மூச்சு (?:விட|திணறல்)|நெஞ்சு வலி|மயக்கம்/i;
-  var STOP = /^(?:stop|quiet|cancel|enough|be quiet|रुको|बस|चुप|நிறுத்து)\b/i;
-  var CITY = /\b(?:change|set|switch)\s+(?:the\s+)?city\s+to\s+(.+)/i;
+  var SUPPORTED_LANGS = ['en', 'hi', 'ta', 'te', 'kn', 'ml'];
+  var EMERGENCY = /can'?t breathe|cannot breathe|difficulty breathing|trouble breathing|chest pain|heart attack|faint(?:ed|ing)?|unconscious|passed out|choking|asthma attack|सांस नहीं|सांस लेने में तकलीफ|सीने में दर्द|बेहोश|மூச்சு (?:விட|திணறல்)|நெஞ்சு வலி|மயக்கம்|శ్వాస|ఛాతీ నొప్పి|ಉಸಿರು|ಎದೆ ನೋವು|ശ്വാസം|നെഞ്ച് വേദന/i;
+  var STOP = /^(?:stop|quiet|cancel|enough|be quiet|रुको|बस|चुप|நிறுத்து|ఆపు|నెమ్మదిగా|ನಿಲ್ಲಿಸು|നിർത്തുക)\b/i;
+  var STOPLISTEN = /\b(?:stop listening|go to sleep|goodbye|good bye|turn off|switch off)\b|सुनना बंद|अलविदा|बंद करो|கேட்பதை நிறுத்து|వినడం ఆపు|ಕೇಳುವುದನ್ನು ನಿಲ್ಲಿಸು|കേൾക്കുന്നത് നിർത്തുക/i;
+  var CITY = /\b(?:change|set|switch|select|open|show|move|navigate|go|visit|pick|choose|update)\s+(?:me\s+)?(?:the\s+)?(?:(?:city|state|country|district|location|place|region|station)\s+)?(?:(?:to|into|of|as|for)\s+)?(.+)/i;
+  var INDIC_PLACE_CMD = /(?:देश|राज्य|प्रदेश|शहर|जिला|स्थान|நகரம்|மாநிலம்|நாடு|மாவட்டம்|నగరం|రాష్ట్రం|దేశం|ನಗರ|ರಾಜ್ಯ|ದೇಶ|നഗരം|സംസ്ഥാനം|രാജ്യം|बदलो|बदलें|दिखाओ|करो|माற்று|காட்டு|మార్చు|ಬದಲಿಸಿ|മാറ്റുക)/;
+  var NON_PLACE_CMD = /^(?:the\s+)?(?:forecast|health\s+advice|advice|air\s+quality|aqi|weather|mask|hospitals?|simulator|planner|page\s*\d+|help|details?|summary|chart|map|this\s+page)$/i;
+  var PLACE_IN_Q = /\b(?:in|for|of|at|to|from)\s+([a-zA-Z\u0900-\u0D7F][a-zA-Z\u0900-\u0D7F\s,.\-&]{1,50})$/i;
   var LOCAL_INTENTS = { page1: 1, page2: 1, simulator: 1, planner: 1, help: 1 };
 
-  var st = { on: false, rec: null, awake: false, busy: false, awakeTimer: null, idleTimer: null, history: [], ctx: null };
+  var st = { mode: 'active', rec: null, busy: false, woke: false, lang: '', activeTimer: null, idleTimer: null, greeted: false, gestureArmed: false, resumeArmed: false, history: [] };
   var ui = {};
-  var PREF = 'aircast_assistant_on';
+  var INTRO = 'aircast_assistant_intro';
 
+  function normLang(code) {
+    return String(code || '').toLowerCase().trim().split(/[-_]/)[0];
+  }
   function langCode() {
     var l = '';
-    try { l = localStorage.getItem('lang') || ''; } catch (e) { /* ignore */ }
-    return String(l || document.documentElement.lang || 'en').toLowerCase().split(/[-_]/)[0];
+    try { if (typeof CFG.getLang === 'function') l = CFG.getLang() || ''; } catch (e) { /* ignore */ }
+    if (!l) l = st.lang || '';
+    if (!l) { try { l = localStorage.getItem('lang') || ''; } catch (e) { /* ignore */ } }
+    var c = normLang(l || document.documentElement.lang || 'en');
+    return c || 'en';
   }
   function locale() { return LOCALES[langCode()] || 'en-IN'; }
   function t(k) { var l = langCode(); return (STR[l] && STR[l][k]) || STR.en[k] || k; }
   function A() { return window.AirCastA11y || null; }
+
+  function detectLangCommand(q) {
+    var s = String(q || '').toLowerCase().trim();
+    if (!/(?:language|speak|talk|switch|change|hindi|tamil|telugu|kannada|malayalam|english|हिन्दी|हिंदी|தமிழ்|తెలుగు|ಕನ್ನಡ|മലയാളം)/i.test(s)) return null;
+    if (/(?:\bhindi\b|हिन्दी|हिंदी)/i.test(s)) return 'hi';
+    if (/(?:\btamil\b|தமிழ்)/i.test(s)) return 'ta';
+    if (/(?:\btelugu\b|తెలుగు)/i.test(s)) return 'te';
+    if (/(?:\bkannada\b|ಕನ್ನಡ)/i.test(s)) return 'kn';
+    if (/(?:\bmalayalam\b|മലയാളം)/i.test(s)) return 'ml';
+    if (/(?:\benglish\b)/i.test(s)) return 'en';
+    return null;
+  }
+
+  function applyLanguage(code, fromVoice) {
+    var next = normLang(code);
+    if (!next) return;
+    if (SUPPORTED_LANGS.indexOf(next) === -1 && !LOCALES[next]) next = 'en';
+    var prev = st.lang || langCode();
+    st.lang = next;
+    try { localStorage.setItem('lang', next); } catch (e) { /* ignore */ }
+    document.documentElement.lang = next;
+    if (typeof CFG.setLanguage === 'function') {
+      var curApp = '';
+      try { curApp = typeof CFG.getLang === 'function' ? normLang(CFG.getLang()) : ''; } catch (e) { curApp = ''; }
+      if (curApp !== next) {
+        try { CFG.setLanguage(next); } catch (e) { /* ignore */ }
+      }
+    }
+    var a = A();
+    if (a && a.refresh) { try { a.refresh(); } catch (e) { /* ignore */ } }
+    if (prev !== next) {
+      stopRec();
+      if (fromVoice) {
+        speak(t('langSwitched'), next);
+      } else {
+        if (st.mode === 'active') setStatus('stListen');
+        else if (st.mode === 'standby') setStatus('stWait');
+        if (st.mode !== 'off' && !(window.speechSynthesis && window.speechSynthesis.speaking)) {
+          setTimeout(startRec, 120);
+        }
+      }
+    }
+  }
 
   /* ------------------------------- sounds -------------------------------- */
   var ac = null;
@@ -1045,7 +1353,7 @@
       try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
       var u = new SpeechSynthesisUtterance(text); u.lang = LOCALES[want] || 'en-IN'; window.speechSynthesis.speak(u);
     }
-    waitQuiet(function () { setStatus(st.on ? 'stWait' : 'stOff'); if (st.on) startRec(); });
+    waitQuiet(resume);
   }
   function cancelSpeech() { try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ } }
   function waitQuiet(cb) {
@@ -1053,8 +1361,8 @@
     var iv = setInterval(function () {
       tries++;
       var speaking = 'speechSynthesis' in window && window.speechSynthesis.speaking;
-      if (!speaking || tries > 150) { clearInterval(iv); setTimeout(cb, 350); }
-    }, 300);
+      if (!speaking || tries > 450) { clearInterval(iv); setTimeout(cb, 120); }
+    }, 100);
   }
   function clean(text) {
     var s = String(text || '').replace(/```[\s\S]*?```/g, ' ').replace(/https?:\/\/\S+/g, ' ')
@@ -1065,64 +1373,144 @@
 
   /* ----------------------------- recognition ----------------------------- */
   function startRec() {
-    if (!st.on || st.rec) return true;
+    if (st.mode === 'off' || st.rec) return true;
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { st.on = false; setUi(); speak(t('unsupported')); return false; }
+    if (!SR) { st.mode = 'off'; return false; }
     var r = new SR();
-    r.lang = locale(); r.continuous = true; r.interimResults = false; r.maxAlternatives = 3;
+    r.lang = locale(); r.continuous = true; r.interimResults = true; r.maxAlternatives = 3;
     r.onresult = function (e) {
       for (var i = e.resultIndex; i < e.results.length; i++) {
-        if (!e.results[i].isFinal) continue;
+        var res = e.results[i];
+        if (!res.isFinal) {
+          // Interim results arrive fast: react to the wake word immediately and keep the listening window open.
+          if (st.mode === 'active') startActiveTimer(6);
+          else if (st.mode === 'standby' && !st.woke && CFG.wake.test(res[0].transcript)) { st.woke = true; cancelSpeech(); beep([880, 1175]); }
+          continue;
+        }
+        var already = st.woke; st.woke = false;
         var alts = [];
-        for (var j = 0; j < e.results[i].length; j++) alts.push(e.results[i][j].transcript);
-        heard(alts);
+        for (var j = 0; j < res.length; j++) alts.push(res[j].transcript);
+        heard(alts, already);
       }
     };
     r.onerror = function (ev) {
-      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { st.on = false; stopRec(); setUi(); speak(t('denied')); }
+      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { goOff(); speak(t('denied')); }
     };
-    r.onend = function () { st.rec = null; if (st.on && !st.busy && !(window.speechSynthesis && window.speechSynthesis.speaking)) setTimeout(startRec, 300); };
-    try { r.start(); st.rec = r; setStatus(st.awake ? 'stListen' : 'stWait'); } catch (e) { st.rec = null; }
+    r.onend = function () {
+      st.rec = null;
+      if (st.mode !== 'off' && !st.busy && !(window.speechSynthesis && window.speechSynthesis.speaking)) setTimeout(startRec, 200);
+    };
+    try { r.start(); st.rec = r; } catch (e) { st.rec = null; }
     return true;
   }
   function stopRec() {
     var r = st.rec; st.rec = null;
     if (r) { r.onend = null; r.onresult = null; try { r.abort(); } catch (e) { /* ignore */ } }
   }
+  function stripWake(text) { return String(text || '').replace(CFG.wake, ' ').replace(/^[\s,.!?\-]+/, '').trim(); }
 
-  function heard(alts) {
+  function heard(alts, alreadyBeeped) {
     resetIdle();
     var text = alts[0] || '';
-    var wakeText = alts.filter(function (a) { return CFG.wake.test(a); })[0];
-    if (st.awake && !wakeText) { endAwake(); process(text); return; }
-    if (wakeText) {
-      var m = wakeText.match(CFG.wake);
-      var rest = wakeText.slice(m.index + m[0].length).replace(/^[\s,.!?\-]+/, '');
-      cancelSpeech(); beep([880, 1175]);
-      if (rest.length > 2) { endAwake(); process(rest); return; }
-      st.awake = true; setStatus('stListen');
-      clearTimeout(st.awakeTimer);
-      st.awakeTimer = setTimeout(endAwake, 9000);
+    var wakeAlt = alts.filter(function (a) { return CFG.wake.test(a); })[0];
+    if (st.mode === 'standby') {
+      if (!wakeAlt) return;
+      if (!alreadyBeeped) { cancelSpeech(); beep([880, 1175]); }
+      var rest = stripWake(wakeAlt);
+      st.mode = 'active'; setStatus('stListen');
+      if (rest.length > 2) process(rest); else startActiveTimer();
+      return;
+    }
+    if (st.mode === 'active') {
+      clearTimeout(st.activeTimer);
+      var q = stripWake(wakeAlt || text);
+      if (!q) { startActiveTimer(); return; }
+      process(q);
     }
   }
-  function endAwake() { st.awake = false; clearTimeout(st.awakeTimer); setStatus(st.on ? 'stWait' : 'stOff'); }
+
+  /* ------------------------------ listening modes ------------------------ */
+  function openActive() {
+    if (st.mode === 'off') return;
+    st.mode = 'active'; st.busy = false;
+    setStatus('stListen'); startRec(); startActiveTimer();
+  }
+  function startActiveTimer(sec) {
+    clearTimeout(st.activeTimer);
+    st.activeTimer = setTimeout(toStandby, (sec || CFG.activeSeconds) * 1000);
+  }
+  function toStandby() { if (st.mode !== 'active') return; st.mode = 'standby'; setStatus('stWait'); startRec(); }
+  function resume() { if (st.mode !== 'off') openActive(); }
+  function resetIdle() {
+    clearTimeout(st.idleTimer);
+    if (!CFG.idleMinutes) return;
+    st.idleTimer = setTimeout(function () { if (st.mode === 'standby') goOff(); else resetIdle(); }, CFG.idleMinutes * 60000);
+  }
 
   /* ------------------------------ understanding -------------------------- */
+  function formatSwitchedReply(res, fallbackName) {
+    if (!res) return t('placeNotFound');
+    var hierarchy = [];
+    if (res.city) hierarchy.push(res.city);
+    if (res.state && res.state !== res.city) hierarchy.push(res.state);
+    if (res.country) hierarchy.push(res.country);
+    var label = hierarchy.length ? hierarchy.join(', ') : (fallbackName || '');
+    var prefix = t('placeSwitched') + ' ' + label + '. ';
+    return prefix + (res.summary || '');
+  }
+  function extractPlaceCommand(q) {
+    var m = q.match(CITY);
+    if (m && m[1]) {
+      var cand = m[1].replace(/[.,!?]+$/, '').trim();
+      if (cand && !NON_PLACE_CMD.test(cand)) return cand;
+    }
+    if (INDIC_PLACE_CMD.test(q)) {
+      return q.replace(/[.,!?]+$/, '').trim();
+    }
+    var directRole = q.match(/^(?:country|state|city|district|location)\s+(?:is\s+|to\s+)?(.+)/i);
+    if (directRole && directRole[1]) {
+      return directRole[1].replace(/[.,!?]+$/, '').trim();
+    }
+    return '';
+  }
   function process(q) {
     q = (q || '').trim();
     if (!q) return;
-    if (STOP.test(q)) { cancelSpeech(); return; }
+    if (STOPLISTEN.test(q)) { goOff(); return; }
+    if (STOP.test(q)) { cancelSpeech(); startActiveTimer(); return; }
     var a = A();
     if (EMERGENCY.test(q)) {
       if (a && a.announce) a.announce(t('emergency'), 'severe'); else speak(t('emergency'));
-      stopRec(); waitQuiet(function () { if (st.on) startRec(); });
+      stopRec(); waitQuiet(resume);
       return;
     }
-    var city = q.match(CITY);
-    if (city && a) { stopRec(); a.command('change city to ' + city[1]); waitQuiet(function () { if (st.on) startRec(); }); return; }
+    var targetLang = detectLangCommand(q);
+    if (targetLang) {
+      applyLanguage(targetLang, true);
+      return;
+    }
     var id = a && a.intent ? a.intent(q) : null;
     var short = q.split(/\s+/).length <= 5;
-    if (a && id && LOCAL_INTENTS[id] && short) { stopRec(); a.command(q); waitQuiet(function () { if (st.on) startRec(); }); return; }
+    if (a && id && LOCAL_INTENTS[id] && short) { stopRec(); a.command(q); waitQuiet(resume); return; }
+    var targetPlace = extractPlaceCommand(q);
+    if (targetPlace) {
+      if (typeof CFG.onSelectPlace === 'function') {
+        var res = CFG.onSelectPlace(targetPlace);
+        if (res && res.found) {
+          var reply = formatSwitchedReply(res, targetPlace);
+          st.history.push({ q: q, a: reply });
+          speak(reply, langCode());
+          return;
+        }
+        // Only treat missing match as notFound if user gave an explicit change/switch/country/state/city command
+        if (/\b(?:change|switch|set|select|country|state|city|district|location)\b|देश|राज्य|शहर|बदलो|நாடு|மாநிலம்|நகரம்|மாற்று|దేశం|రాష్ట్రం|నగరం|మార్చు|ದೇಶ|ರಾಜ್ಯ|ನಗರ|ಬದಲಿಸಿ|രാജ്യം|സംസ്ഥാനം|നഗരം|മാറ്റുക/i.test(q)) {
+          speak(t('placeNotFound'), langCode());
+          return;
+        }
+      } else if (a) {
+        stopRec(); a.command('change city to ' + targetPlace); waitQuiet(resume); return;
+      }
+    }
     if (CFG.ask) { ask(q); return; }
     answerLocally(q);
   }
@@ -1152,22 +1540,51 @@
       poor: 'அனைவரும் வெளியே கடினமான உடற்பயிற்சியைக் குறைக்கவும். உணர்திறன் உள்ளவர்கள் முடிந்தால் வீட்டிற்குள் இருக்கவும். வெளியே சரியாகப் பொருந்தும் N95 முகக்கவசம் உதவும்.',
       veryPoor: 'வெளியே உடற்பயிற்சி வேண்டாம். ஜன்னல்களை மூடி வீட்டிற்குள் இருங்கள்; வெளியே செல்ல வேண்டுமெனில் சரியாகப் பொருந்தும் N95 முகக்கவசம் அணியுங்கள்.',
       severe: 'ஜன்னல்களை மூடி வீட்டிற்குள் இருங்கள்; வெளிப்புற செயல்களைத் தவிர்க்கவும். மூச்சுத் திணறல் இருந்தால் 108 ஐ அழைக்கவும்.'
+    },
+    te: {
+      good: 'గాలి చాలా బాగుంది. అందరూ బయట కార్యకలాపాలు చేసుకోవచ్చు.',
+      satisfactory: 'గాలి నాణ్యత సంతృప్తికరంగా ఉంది. చాలా సున్నితమైన వారు ఎక్కువ సేపు కఠిన శ్రమ తగ్గించాలి.',
+      moderate: 'ఆస్తమా, గుండె లేదా ఊపిరితిత్తుల సమస్యలు ఉన్నవారు, పిల్లలు మరియు వృద్ధులు బయట ఎక్కువ సమయం వ్యాయామం తగ్గించండి.',
+      poor: 'అందరూ బయట కఠిన వ్యాయామాలు తగ్గించండి. సున్నితమైన వారు ఇంట్లోనే ఉండండి. బయటకు వెళితే N95 మాస్క్ ధరించండి.',
+      veryPoor: 'బయట వ్యాయామం చేయకండి. కిటికీలు మూసి ఇంట్లోనే ఉండండి; బయటకు వెళ్లాల్సి వస్తే N95 మాస్క్ తప్పక ధరించండి.',
+      severe: 'కిటికీలు మూసి ఇంట్లోనే ఉండండి. శ్వాస తీసుకోవడంలో ఇబ్బంది ఉంటే 108కు కాల్ చేయండి.'
+    },
+    kn: {
+      good: 'ಗಾಳಿ ಉತ್ತಮವಾಗಿದೆ. ಎಲ್ಲರೂ ಹೊರಗೆ ಹೋಗಬಹುದು.',
+      satisfactory: 'ಗಾಳಿಯ ಗುಣಮಟ್ಟ ತೃಪ್ತಿಕರವಾಗಿದೆ. ತುಂಬಾ ಸೂಕ್ಷ್ಮ ಆರೋಗ್ಯದವರು ದೀರ್ಘಕಾಲ ಶ್ರಮದ ಕೆಲಸವನ್ನು ಕಡಿಮೆ ಮಾಡಬೇಕು.',
+      moderate: 'ಅಸ್ತಮಾ, ಹೃದಯ ಅಥವಾ ಶ್ವಾಸಕೋಶದ ಸಮಸ್ಯೆ ಇರುವವರು, ಮಕ್ಕಳು ಮತ್ತು ಹಿರಿಯರು ಹೊರಗೆ ದೀರ್ಘ ವ್ಯಾಯಾಮವನ್ನು ಕಡಿಮೆ ಮಾಡಿ.',
+      poor: 'ಎಲ್ಲರೂ ಹೊರಗೆ ಕಠಿಣ ವ್ಯಾಯಾಮವನ್ನು ಕಡಿಮೆ ಮಾಡಿ. ಸೂಕ್ಷ್ಮ ವ್ಯಕ್ತಿಗಳು ಒಳಗೆ ಇರಿ. ಹೊರಗೆ N95 ಮಾಸ್ಕ್ ಧರಿಸಿ.',
+      veryPoor: 'ಹೊರಗೆ ವ್ಯಾಯಾಮ ಮಾಡಬೇಡಿ. ಕಿಟಕಿಗಳನ್ನು ಮುಚ್ಚಿ ಒಳಗೆ ಇರಿ; ಹೊರಗೆ ಹೋಗಲೇಬೇಕಾದರೆ N95 ಮಾಸ್ಕ್ ಧರಿಸಿ.',
+      severe: 'ಕಿಟಕಿಗಳನ್ನು ಮುಚ್ಚಿ ಒಳಗೆ ಇರಿ. ಉಸಿರಾಡಲು ತೊಂದರೆಯಾದರೆ 108ಕ್ಕೆ ಕರೆ ಮಾಡಿ.'
+    },
+    ml: {
+      good: 'വായു നല്ലതാണ്. എല്ലാവർക്കും പുറത്തിറങ്ങാം.',
+      satisfactory: 'വായു ഗുണനിലവാരം തൃപ്തികരമാണ്. കൂടുതൽ സംവേദനക്ഷമതയുള്ളവർ കഠിനമായ പുറം ജോലികൾ കുറയ്ക്കുക.',
+      moderate: 'ആസ്ത്മ, ഹൃദയ അല്ലെങ്കിൽ ശ്വാസകോശ പ്രശ്നങ്ങൾ ഉള്ളവർ, കുട്ടികൾ, പ്രായമായവർ എന്നിവർ പുറത്തെ വ്യായാമം കുറയ്ക്കുക.',
+      poor: 'എല്ലാവരും പുറത്തെ കഠിന വ്യായാമം കുറയ്ക്കുക. സംവേദനക്ഷമതയുള്ളവർ വീടിനുള്ളിൽ ഇരിക്കുക. പുറത്ത് N95 മാസ്ക് ധരിക്കുക.',
+      veryPoor: 'പുറത്ത് വ്യായാമം ഒഴിവാക്കുക. ജനലുകൾ അടച്ച് വീടിനുള്ളിൽ തുടരുക; പുറത്തിറങ്ങണമെങ്കിൽ N95 മാസ്ക് ധരിക്കുക.',
+      severe: 'ജനലുകൾ അടച്ച് വീടിനുള്ളിൽ തുടരുക. ശ്വാസതടസ്സം ഉണ്ടെങ്കിൽ 108-ൽ വിളിക്കുക.'
     }
   };
   var MASK = {
     en: 'A well-fitted N95 or FFP2 respirator filters fine particles. Cloth or surgical masks do not filter them well. Wear one outdoors when the air is poor or worse.',
     hi: 'सही फिट वाला N95 या FFP2 मास्क महीन कणों को रोकता है। कपड़े या सर्जिकल मास्क इन्हें अच्छी तरह नहीं रोकते। हवा खराब हो तो बाहर इसे पहनें।',
-    ta: 'சரியாகப் பொருந்தும் N95 அல்லது FFP2 முகக்கவசம் நுண்துகள்களை வடிகட்டும். துணி அல்லது அறுவை சிகிச்சை முகக்கவசங்கள் அவற்றை நன்றாக வடிகட்டாது. காற்று மோசமாக இருந்தால் வெளியே அணியுங்கள்.'
+    ta: 'சரியாகப் பொருந்தும் N95 அல்லது FFP2 முகக்கவசம் நுண்துகள்களை வடிகட்டும். துணி அல்லது அறுவை சிகிச்சை முகக்கவசங்கள் அவற்றை நன்றாக வடிகட்டாது. காற்று மோசமாக இருந்தால் வெளியே அணியுங்கள்.',
+    te: 'సరిగ్గా అమరే N95 లేదా FFP2 మాస్క్ సూక్ష్మ కణాలను ఆపుతుంది. గాలి నాణ్యత తక్కువగా ఉన్నప్పుడు బయట దీన్ని ధరించండి.',
+    kn: 'ಸರಿಯಾಗಿ ಹೊಂದಿಕೊಳ್ಳುವ N95 ಅಥವಾ FFP2 ಮಾಸ್ಕ್ ಸೂಕ್ಷ್ಮ ಕಣಗಳನ್ನು ತಡೆಯುತ್ತದೆ. ಗಾಳಿ ಕಳಪೆಯಾಗಿದ್ದಾಗ ಹೊರಗೆ ಇದನ್ನು ಧರಿಸಿ.',
+    ml: 'നന്നായി യോജിക്കുന്ന N95 അല്ലെങ്കിൽ FFP2 മാസ്ക് സൂക്ഷ്മ കണങ്ങളെ തടയും. വായു മോശമാകുമ്പോൾ പുറത്ത് ഇത് ധരിക്കുക.'
   };
   var FALLBACK = {
     en: 'I can tell you the air quality now, whether it is safe to go outside, masks, the best time outdoors, and the forecast. You can also say page 1, page 2, simulator or planner.',
     hi: 'मैं अभी की वायु गुणवत्ता, बाहर जाना सुरक्षित है या नहीं, मास्क, बाहर का सबसे अच्छा समय और पूर्वानुमान बता सकता हूँ। आप पेज 1, पेज 2, सिम्युलेटर या योजना भी बोल सकते हैं।',
-    ta: 'தற்போதைய காற்றுத் தரம், வெளியே செல்வது பாதுகாப்பானதா, முகக்கவசம், வெளியே செல்ல சிறந்த நேரம், முன்னறிவிப்பு ஆகியவற்றைச் சொல்ல முடியும். பக்கம் 1, பக்கம் 2, சிமுலேட்டர் அல்லது திட்டம் என்றும் சொல்லலாம்.'
+    ta: 'தற்போதைய காற்றுத் தரம், வெளியே செல்வது பாதுகாப்பானதா, முகக்கவசம், வெளியே செல்ல சிறந்த நேரம், முன்னறிவிப்பு ஆகியவற்றைச் சொல்ல முடியும். பக்கம் 1, பக்கம் 2, சிமுலேட்டர் அல்லது திட்டம் என்றும் சொல்லலாம்.',
+    te: 'ప్రస్తుత గాలి నాణ్యత, బయటకు వెళ్లడం సురక్షితమా, మాస్క్, బయటకు వెళ్లడానికి ఉత్తమ సమయం మరియు సూచన గురించి నేను చెప్పగలను.',
+    kn: 'ಪ್ರಸ್ತುತ ಗಾಳಿಯ ಗುಣಮಟ್ಟ, ಹೊರಗೆ ಹೋಗುವುದು ಸುರಕ್ಷಿತವೇ, ಮಾಸ್ಕ್, ಉತ್ತಮ ಸಮಯ ಮತ್ತು ಮುನ್ಸೂಚನೆಯನ್ನು ನಾನು ಹೇಳಬಲ್ಲೆ.',
+    ml: 'ഇപ്പോഴത്തെ വായു ഗുണനിലവാരം, പുറത്തുപോകുന്നത് സുരക്ഷിതമാണോ, മാസ്ക്, ഏറ്റവും നല്ല സമയം, പ്രവചനം എന്നിവ എനിക്ക് പറയാൻ കഴിയും.'
   };
   function levelOf(a) { return a <= 50 ? 'good' : a <= 100 ? 'satisfactory' : a <= 200 ? 'moderate' : a <= 300 ? 'poor' : a <= 400 ? 'veryPoor' : 'severe'; }
   function pick(tbl, l) { return tbl[l] ? { text: tbl[l], lang: l } : { text: tbl.en, lang: 'en' }; }
 
-  // Returns { text, lang }. Hindi/Tamil are available for the core answers; other answers use English.
   function localAnswer(q, ctx) {
     var l = langCode(), a = A(), s = (a && a.status && a.status()) || {};
     var aqi = ctx.aqi != null ? Number(ctx.aqi) : s.aqi;
@@ -1181,29 +1598,32 @@
 
     if (/what is (?:the )?(?:aqi|air quality index|pm ?2\.?5)/.test(x))
       return en('The air quality index is a number showing how clean or polluted the air is. Higher means worse. PM2.5 is fine dust small enough to reach deep into the lungs.');
-    if (/hospital|clinic|doctor|अस्पताल|மருத்துவமனை/.test(x))
+    if (/hospital|clinic|doctor|अस्पताल|மருத்துவமனை|ఆసుపత్రి|ಆಸ್ಪತ್ರೆ|ആശുപത്രി/.test(x))
       return en('Say page 2 and open the clean-air hospitals section. In an emergency, call 108.');
-    if (/mask|n95|मास्क|முகக்கவசம்/.test(x)) { var m = ADV[l] ? { text: MASK[l], lang: l } : en(MASK.en); return m; }
-    if (/child|kid|baby|old age|elder|asthma|copd|pregnan|बच्च|बुज़ुर्ग|दमा|குழந்தை|ஆஸ்துமா/.test(x))
+    if (/mask|n95|मास्क|முகக்கவசம்|మాస్క్|ಮಾಸ್ಕ್|മാസ്ക്/.test(x)) { return pick(MASK, l); }
+    if (/child|kid|baby|old age|elder|asthma|copd|pregnan|बच्च|बुज़ुर्ग|दमा|குழந்தை|ஆஸ்துமா|పిల్లలు|ఆస్తమా|ಮಕ್ಕಳು|ಅಸ್ತಮಾ|കുട്ടികൾ|ആസ്ത്മ/.test(x))
       return have ? (function () { var r = advice(); if (r.lang === 'en') r.text += ' Keep any reliever medicine your doctor prescribed within reach.'; return r; })() : noData;
-    if (/window|indoor|ventilat|खिड़की|ஜன்னல்/.test(x))
+    if (/window|indoor|ventilat|खिड़की|ஜன்னல்|కిటికీ|ಕಿಟಕಿ|ജനൽ/.test(x))
       return en('Keep windows closed when the air is poor or worse, and open them when it improves, usually around midday.');
-    if (/best (?:time|hour)|cleanest|when (?:should|can|is).*(?:go|walk|run|outside|exercise)|सबसे अच्छा समय|சிறந்த நேரம்/.test(x))
+    if (/best (?:time|hour)|cleanest|when (?:should|can|is).*(?:go|walk|run|outside|exercise)|सबसे अच्छा समय|சிறந்த நேரம்|ఉత్తమ సమయం|ಉತ್ತಮ ಸಮಯ|മികച്ച സമയം/.test(x))
       return ctx.bestHour ? en('The cleanest hour today is around ' + ctx.bestHour + '.' + (ctx.worstHour ? ' The worst is around ' + ctx.worstHour + '.' : '')) : en('I do not have the best hour yet. Open the hourly forecast on page 1.');
-    if (/forecast|tomorrow|tonight|later|next|पूर्वानुमान|कल|முன்னறிவிப்பு/.test(x))
+    if (/forecast|tomorrow|tonight|later|next|पूर्वानुमान|कल|முன்னறிவிப்பு|సూచన|ಮುನ್ಸೂಚನೆ|പ്രവചനം/.test(x))
       return en(ctx.forecast || 'The forecast summary is not available yet. Open the hourly forecast on page 1.');
-    if (/\bwhy\b|reason|cause|क्यों|ஏன்/.test(x))
+    if (/\bwhy\b|reason|cause|क्यों|ஏன்|ఎందుకు|ಏಕೆ|എന്തുകൊണ്ട്/.test(x))
       return ctx.topDriver ? en('The biggest factor right now is ' + ctx.topDriver + '.') : en('I do not have the main cause yet. Open the explanation chart on page 2.');
-    if (/temperature|how hot|तापमान|வெப்பநிலை/.test(x) && ctx.temp != null) return en('The temperature is ' + ctx.temp + ' degrees Celsius.');
-    if (/wind|हवा की गति|காற்றின் வேகம்/.test(x) && ctx.wind != null) return en('Wind speed is ' + ctx.wind + ' kilometres per hour.');
-    if (/humid|नमी|ஈரப்பதம்/.test(x) && ctx.humidity != null) return en('Humidity is ' + ctx.humidity + ' percent.');
-    if (/safe|go out|outside|walk|run|jog|exercise|play|cycle|bike|market|बाहर|टहल|दौड़|வெளியே|நடை/.test(x))
+    if (/temperature|how hot|तापमान|வெப்பநிலை|ఉష్ణోగ్రత|ತಾಪಮಾನ|താപനില/.test(x) && ctx.temp != null) return en('The temperature is ' + ctx.temp + ' degrees Celsius.');
+    if (/wind|हवा की गति|காற்றின் வேகம்|గాలి వేగం|ಗಾಳಿಯ ವೇಗ|കാറ്റിന്റെ വേഗത/.test(x) && ctx.wind != null) return en('Wind speed is ' + ctx.wind + ' kilometres per hour.');
+    if (/humid|नमी|ஈரப்பதம்|తేమ|ಆರ್ದ್ರತೆ|ഈർപ്പം/.test(x) && ctx.humidity != null) return en('Humidity is ' + ctx.humidity + ' percent.');
+    if (/safe|go out|outside|walk|run|jog|exercise|play|cycle|bike|market|बाहर|टहल|दौड़|வெளியே|நடை|బయట|ಹೊರಗೆ|പുറത്ത്/.test(x))
       return have ? advice() : noData;
-    if (/air quality|aqi|how(?:'s| is) the air|pollution|वायु|हवा|प्रदूषण|காற்று/.test(x)) {
+    if (/air quality|aqi|how(?:'s| is) the air|pollution|वायु|हवा|प्रदूषण|காற்று|గాలి|ಗಾಳಿ|വായു/.test(x)) {
       if (!have) return noData;
       var cat = ctx.category || '';
       if (l === 'hi') return { text: (city ? city + ' में ' : '') + 'वायु गुणवत्ता सूचकांक ' + aqi + ' है' + (cat ? ', जो ' + cat + ' है।' : '।'), lang: 'hi' };
       if (l === 'ta') return { text: (city ? city + '-ல் ' : '') + 'காற்றுத் தரக் குறியீடு ' + aqi + (cat ? ', இது ' + cat + '.' : '.'), lang: 'ta' };
+      if (l === 'te') return { text: (city ? city + 'లో ' : '') + 'గాలి నాణ్యత సూచిక ' + aqi + (cat ? ', ఇది ' + cat + '.' : '.'), lang: 'te' };
+      if (l === 'kn') return { text: (city ? city + 'ನಲ್ಲಿ ' : '') + 'ಗಾಳಿಯ ಗುಣಮಟ್ಟ ಸೂಚ್ಯಂಕ ' + aqi + (cat ? ', ಇದು ' + cat + '.' : '.'), lang: 'kn' };
+      if (l === 'ml') return { text: (city ? city + '-ൽ ' : '') + 'വായു ഗുണനിലവാര സൂചിക ' + aqi + (cat ? ', ഇത് ' + cat + '.' : '.'), lang: 'ml' };
       return en((city ? 'In ' + city + ', the' : 'The') + ' air quality index is ' + aqi + (cat ? ', which is ' + cat : '') + '.' + (ctx.pm25 != null ? ' PM2.5 is ' + ctx.pm25 + ' micrograms per cubic metre.' : ''));
     }
     return pick(FALLBACK, l);
@@ -1211,6 +1631,28 @@
   function answerLocally(q) {
     var ctx = {};
     try { ctx = (CFG.getContext && CFG.getContext()) || {}; } catch (e) { ctx = {}; }
+
+    // If the user mentioned any city, state, or country in their question (e.g. "air quality in Tamil Nadu",
+    // "how is Japan", or just "Kerala"), switch to that place and answer with its live data immediately.
+    if (typeof CFG.onSelectPlace === 'function') {
+      var inMatch = q.match(PLACE_IN_Q);
+      var candidate = (inMatch ? inMatch[1] : q).replace(/[.,!?]+$/, '').trim();
+      var switched = candidate ? CFG.onSelectPlace(candidate) : null;
+      if (!switched || !switched.found) {
+        switched = CFG.onSelectPlace(q.trim());
+      }
+      if (switched && switched.found) {
+        if (switched.context) ctx = switched.context;
+        var isQuestionWord = /forecast|tomorrow|tonight|mask|n95|safe|outside|walk|run|why|reason|cause|temp|wind|humid|hospital|doctor|best|cleanest|window|indoor|child|asthma/i.test(q);
+        if (!isQuestionWord && switched.summary) {
+          var reply = formatSwitchedReply(switched, candidate);
+          st.history.push({ q: q, a: reply });
+          speak(reply, langCode());
+          return;
+        }
+      }
+    }
+
     var r = localAnswer(q, ctx);
     st.history.push({ q: q, a: r.text });
     speak(r.text, r.lang);
@@ -1232,63 +1674,128 @@
       .catch(function () { st.busy = false; speak(t('error')); });
   }
 
-  /* ------------------------------ on / off ------------------------------- */
-  function resetIdle() {
-    clearTimeout(st.idleTimer);
-    if (!st.on || !CFG.idleMinutes) return;
-    st.idleTimer = setTimeout(function () { turnOff(false); speak(t('paused')); }, CFG.idleMinutes * 60000);
+  /* --------------------------- off / tap to resume ----------------------- */
+  function goOff() {
+    st.mode = 'off'; stopRec(); cancelSpeech();
+    clearTimeout(st.activeTimer); clearTimeout(st.idleTimer);
+    setStatus('stOff'); beep([520, 390]);
+    armResume();
   }
-  function turnOn(first) {
-    st.on = true; try { localStorage.setItem(PREF, '1'); } catch (e) { /* ignore */ }
-    setUi(); resetIdle();
-    speak(first === false ? t('on') : t('on') + ' ' + t('disclosure'));
+  function armResume() {
+    if (st.resumeArmed) return;
+    st.resumeArmed = true;
+    var go = function () {
+      document.removeEventListener('pointerdown', go, true); document.removeEventListener('keydown', go, true);
+      st.resumeArmed = false;
+      if (st.mode !== 'off') return;
+      beep([880]); resetIdle(); openActive();
+    };
+    setTimeout(function () { document.addEventListener('pointerdown', go, true); document.addEventListener('keydown', go, true); }, 600);
   }
-  function turnOff(say) {
-    st.on = false; st.awake = false; stopRec(); cancelSpeech();
-    try { localStorage.setItem(PREF, '0'); } catch (e) { /* ignore */ }
-    clearTimeout(st.idleTimer); setUi();
-    if (say !== false) speak(t('off'));
+
+  /* -------------------------------- greeting ----------------------------- */
+  function seenIntro() { try { return localStorage.getItem(INTRO) === '1'; } catch (e) { return false; } }
+  function markIntro() { try { localStorage.setItem(INTRO, '1'); } catch (e) { /* ignore */ } }
+  function greetText(first) {
+    var h = new Date().getHours();
+    var part = h >= 5 && h < 12 ? 'gm' : h < 17 && h >= 12 ? 'ga' : h >= 17 && h < 21 ? 'ge' : 'gn';
+    var nice = (part === 'ge' || part === 'gn') ? t('nice2') : t('nice');
+    return t(part) + '! ' + nice + ' ' + t('iam') + ' ' + t('tell') + (first ? ' ' + t('intro') : '');
   }
-  function toggle() { if (st.on) turnOff(); else turnOn(); }
+  function armGreetGesture() {
+    if (st.gestureArmed || st.greeted) return;
+    st.gestureArmed = true;
+    var evs = ['pointerdown', 'keydown', 'touchstart', 'click'];
+    var go = function () {
+      evs.forEach(function (ev) { document.removeEventListener(ev, go, true); });
+      st.gestureArmed = false; greet();
+    };
+    evs.forEach(function (ev) { document.addEventListener(ev, go, true); });
+  }
+  function greet() {
+    if (st.greeted) return;
+    if (!('speechSynthesis' in window)) { st.greeted = true; resume(); return; }
+    var text = greetText(!seenIntro()), started = false;
+    var a = A(); if (a && a.caption) a.caption(text);
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = locale();
+    u.onstart = function () { started = true; st.greeted = true; markIntro(); setStatus('stSpeak'); };
+    u.onend = function () { if (started) waitQuiet(resume); };
+    u.onerror = function () { if (!started) armGreetGesture(); };
+    try { window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch (e) { armGreetGesture(); return; }
+    // If the browser blocked sound (no tap yet), wait for the first tap, key press or screen-reader touch.
+    setTimeout(function () {
+      if (!started && !st.greeted) { try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ } armGreetGesture(); }
+    }, 2500);
+  }
 
   /* --------------------------------- UI ---------------------------------- */
-  function setStatus(key) { if (ui.pill) ui.pill.textContent = t(key); }
-  function setUi() {
-    if (!ui.btn) return;
-    ui.btn.setAttribute('aria-pressed', st.on ? 'true' : 'false');
-    ui.btn.setAttribute('aria-label', t('btn') + ': ' + (st.on ? 'on' : 'off'));
-    ui.btn.style.background = st.on ? '#16a34a' : '#0f172a';
-    ui.pill.style.display = st.on ? 'block' : 'none';
-    setStatus(st.on ? 'stWait' : 'stOff');
+  function setStatus(key) {
+    if (!ui.pill) return;
+    var show = CFG.showStatus && (key === 'stListen' || key === 'stThink' || key === 'stSpeak');
+    ui.pill.style.display = show ? 'block' : 'none';
+    ui.pill.classList.toggle('av-listening', key === 'stListen');
+    if (show) ui.pill.textContent = t(key);
   }
   function init() {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     var s = document.createElement('style');
-    s.textContent = '.av-btn{position:fixed;right:12px;bottom:276px;z-index:99990;width:52px;height:52px;border-radius:26px;border:2px solid #fff;color:#fff;font-size:22px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35)}' +
-      '.av-pill{position:fixed;left:50%;transform:translateX(-50%);top:8px;z-index:99970;background:#0f172a;color:#fff;border:2px solid #fff;border-radius:999px;padding:6px 14px;font:700 13px system-ui,sans-serif;display:none}';
+    s.textContent =
+      '.av-pill{position:fixed;left:50%;transform:translateX(-50%);top:8px;z-index:99970;background:#0f172a;color:#fff;border:2px solid #fff;border-radius:999px;padding:6px 14px;font:700 13px system-ui,sans-serif;display:none;pointer-events:none}' +
+      '@keyframes avPillHaptic{0%,100%{transform:translateX(-50%) scale(1.04)}25%{transform:translateX(calc(-50% - 1.5px)) scale(1.07)}50%{transform:translateX(calc(-50% + 1.5px)) scale(1.05)}75%{transform:translateX(calc(-50% - 1px)) scale(1.08)}}' +
+      '.av-pill.av-listening{animation:avPillHaptic 0.42s cubic-bezier(.36,.07,.19,.97) infinite;background:#be123c}';
     document.head.appendChild(s);
-    ui.btn = document.createElement('button'); ui.btn.className = 'av-btn'; ui.btn.textContent = '🎙';
-    ui.btn.addEventListener('click', toggle);
     ui.pill = document.createElement('div'); ui.pill.className = 'av-pill'; ui.pill.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(ui.btn); document.body.appendChild(ui.pill);
-    setUi();
-    document.addEventListener('keydown', function (e) { if (e.altKey && e.shiftKey && (e.key === 'H' || e.key === 'h')) toggle(); });
-    // Returning users: browsers need one tap before audio/mic can start, so the first tap anywhere resumes the assistant.
-    var was = ''; try { was = localStorage.getItem(PREF); } catch (e) { /* ignore */ }
-    if (was === '1') {
-      var resume = function (ev) {
-        document.removeEventListener('pointerdown', resume, true); document.removeEventListener('keydown', resume, true);
-        if (!st.on && ev.target !== ui.btn) turnOn(false);
-      };
-      document.addEventListener('pointerdown', resume, true); document.addEventListener('keydown', resume, true);
-    }
-    new MutationObserver(function () { setUi(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] });
+    document.body.appendChild(ui.pill);
+    if (!SR) { st.mode = 'off'; return; }   // no voice support: stay silent, nothing to start
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && (e.key === 'H' || e.key === 'h')) { if (st.mode === 'off') { beep([880]); openActive(); } else goOff(); }
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) { stopRec(); cancelSpeech(); }
+      else if (st.mode !== 'off' && st.greeted) { if (st.mode === 'active') openActive(); else startRec(); }
+    });
+    if (CFG.greet === false) { st.greeted = true; st.mode = 'standby'; startRec(); resetIdle(); }
+    else { resetIdle(); setTimeout(greet, CFG.greetDelayMs); }
   }
 
   window.AirCastAssistant = {
-    configure: function (o) { Object.keys(o || {}).forEach(function (k) { CFG[k] = o[k]; }); },
-    start: function () { if (!st.on) turnOn(); },
-    stop: function () { if (st.on) turnOff(); },
-    ask: function (q) { process(q); }
+    configure: function (o) {
+      Object.keys(o || {}).forEach(function (k) { CFG[k] = o[k]; });
+      if (typeof CFG.getLang === 'function') {
+        var cur = normLang(CFG.getLang());
+        if (cur && cur !== st.lang) {
+          st.lang = cur;
+        }
+      }
+    },
+    getLang: langCode,
+    setLanguage: function (code) { applyLanguage(code, false); },
+    start: function () { if (st.mode === 'off') { beep([880]); openActive(); } },
+    stop: goOff,
+    ask: function (q) { if (st.mode === 'off') st.mode = 'active'; process(q); },
+    getAnswer: function (q) {
+      var ctx = {};
+      try { ctx = (CFG.getContext && CFG.getContext()) || {}; } catch (e) { ctx = {}; }
+      var raw = String(q || '').trim();
+      if (typeof CFG.onSelectPlace === 'function') {
+        var explicitPlace = extractPlaceCommand(raw);
+        var inMatch = raw.match(PLACE_IN_Q);
+        var candidate = (explicitPlace || (inMatch ? inMatch[1] : raw)).replace(/[.,!?]+$/, '').trim();
+        var switched = candidate ? CFG.onSelectPlace(candidate) : null;
+        if (!switched || !switched.found) {
+          switched = CFG.onSelectPlace(raw);
+        }
+        if (switched && switched.found) {
+          if (switched.context) ctx = switched.context;
+          var isQ = /forecast|tomorrow|tonight|mask|n95|safe|outside|walk|run|why|reason|cause|temp|wind|humid|hospital|doctor|best|cleanest|window|indoor|child|asthma/i.test(raw);
+          if (!isQ && switched.summary) return formatSwitchedReply(switched, candidate);
+        }
+      }
+      var r = localAnswer(raw, ctx);
+      return (r && r.text) || '';
+    },
+    greet: function () { st.greeted = false; greet(); }
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();

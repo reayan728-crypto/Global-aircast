@@ -12,6 +12,7 @@ import {
   SimulationParams,
   pm25ToAqi
 } from './utils/aqi';
+import { findBestCityMatch } from './utils/placeMatcher';
 
 import { Header } from './components/Header';
 import { AlertBanner } from './components/AlertBanner';
@@ -51,6 +52,7 @@ import { EmergencyModal } from './components/modals/EmergencyModal';
 import { DirectivesModal } from './components/modals/DirectivesModal';
 import { ApiDocsModal } from './components/modals/ApiDocsModal';
 import { useLanguage } from './context/LanguageContext';
+import { LanguageCode, LANGUAGES } from './utils/i18n';
 
 import { ArrowRight, ArrowLeft, Radio, Cpu, Activity, ShieldAlert, Sparkles, MapPin, Sliders, Download, CheckCircle2, Languages } from 'lucide-react';
 
@@ -151,7 +153,7 @@ export function useInstallApp() {
 }
 
 export default function App() {
-  const { t, currentLanguage } = useLanguage();
+  const { t, currentLanguage, setLanguage } = useLanguage();
   // Persistent 'Install App' hook capturing beforeinstallprompt event
   const { deferredPrompt, isInstalled: isAppInstalled, triggerInstall } = useInstallApp();
   const [installToast, setInstallToast] = useState<string | null>(null);
@@ -236,6 +238,12 @@ export default function App() {
   const activeForecastPoint = forecast[activeHourIndex] || forecast[0];
   const activeAqi = pm25ToAqi(activeForecastPoint.medianPm25);
 
+  const bestOutdoorHour = useMemo(() => {
+    if (!forecast.length) return activeForecastPoint.hourLabel;
+    const cleanest = [...forecast].sort((a, b) => a.aqi - b.aqi)[0];
+    return cleanest?.hourLabel || activeForecastPoint.hourLabel;
+  }, [forecast, activeForecastPoint.hourLabel]);
+
   // Single source of truth: simulated PM2.5
   const simulatedPm25 = useMemo(() => {
     return computeSimulatedPm25(selectedCity, params);
@@ -283,6 +291,82 @@ export default function App() {
       ? `${strongestDriver.driver} (${strongestDriver.force >= 0 ? '+' : ''}${strongestDriver.force.toFixed(1)} µg/m³)`
       : 'Local emissions';
 
+    const handleVoiceSelectPlace = (query: string) => {
+      const matched = findBestCityMatch(query);
+      if (!matched) return { found: false };
+
+      const nextParams: SimulationParams = {
+        windSpeed: matched.baseWind,
+        humidity: matched.baseHumidity,
+        temp: matched.baseTemp,
+        trafficMultiplier: matched.baseTraffic,
+        currentPm25: matched.basePm25,
+        diwaliMode: false
+      };
+
+      // Update React state directly so it works on both Page 1 and Page 2 for every state & country
+      setSelectedCity(matched);
+      setParams(nextParams);
+      setActiveHourIndex(0);
+
+      const nextForecast = generate24HourForecast(matched, nextParams, new Date().getHours());
+      const nextCurrent = nextForecast[0];
+      const nextAqi = pm25ToAqi(nextCurrent.medianPm25);
+      const nextCleanest = [...nextForecast].sort((a, b) => a.aqi - b.aqi)[0];
+      const nextWorst = [...nextForecast].sort((a, b) => b.aqi - a.aqi)[0];
+      const nextAvg = Math.round(
+        nextForecast.reduce((acc, p) => acc + p.aqi, 0) / nextForecast.length
+      );
+      const nextDrivers = computeTreeShapDrivers(nextParams, matched);
+      const nextStrongest = [...nextDrivers].sort((a, b) => Math.abs(b.force) - Math.abs(a.force))[0];
+      const nextForecastSummary = t('a11yForecastTemplate', {
+        city: matched.name,
+        avgAqi: nextAvg,
+        cleanestHour: nextCleanest?.hourLabel || nextCurrent.hourLabel,
+        cleanestAqi: nextCleanest?.aqi ?? nextAqi.aqi,
+        worstHour: nextWorst?.hourLabel || nextCurrent.hourLabel,
+        worstAqi: nextWorst?.aqi ?? nextAqi.aqi
+      });
+      const placeLabel =
+        matched.country === 'India'
+          ? `${matched.name}, ${matched.state}`
+          : `${matched.name}, ${matched.country}`;
+      const nextSummary = t('a11ySummaryTemplate', {
+        city: placeLabel,
+        aqi: nextAqi.aqi,
+        category: nextAqi.category,
+        bestHour: nextCleanest?.hourLabel || nextCurrent.hourLabel
+      });
+
+      window.AirCastA11y?.setAqi(nextAqi.aqi, matched.name, { silent: true });
+
+      return {
+        found: true,
+        city: matched.name,
+        state: matched.state,
+        country: matched.country,
+        aqi: nextAqi.aqi,
+        category: nextAqi.category,
+        pm25: nextCurrent.medianPm25,
+        summary: nextSummary,
+        context: {
+          city: placeLabel,
+          aqi: nextAqi.aqi,
+          category: nextAqi.category,
+          pm25: nextCurrent.medianPm25,
+          bestHour: nextCleanest?.hourLabel || nextCurrent.hourLabel,
+          worstHour: nextWorst?.hourLabel || nextCurrent.hourLabel,
+          forecast: nextForecastSummary,
+          topDriver: nextStrongest
+            ? `${nextStrongest.driver} (${nextStrongest.force >= 0 ? '+' : ''}${nextStrongest.force.toFixed(1)} µg/m³)`
+            : 'Local emissions',
+          temp: matched.baseTemp,
+          wind: matched.baseWind,
+          humidity: matched.baseHumidity
+        }
+      };
+    };
+
     const applyA11y = () => {
       if (!window.AirCastA11y) return false;
       window.AirCastA11y.configure({
@@ -296,6 +380,7 @@ export default function App() {
           }),
         getForecast: () => forecastSummary,
         getAdvice: () => t(adviceKey),
+        onSelectPlace: handleVoiceSelectPlace,
         signClips: {
           good: '',
           satisfactory: '',
@@ -328,8 +413,19 @@ export default function App() {
 
       if (window.AirCastAssistant) {
         window.AirCastAssistant.configure({
+          getLang: () => currentLanguage,
+          setLanguage: (code: string) => {
+            const norm = String(code || '').toLowerCase().split(/[-_]/)[0] as LanguageCode;
+            if (LANGUAGES.some(l => l.code === norm)) {
+              setLanguage(norm);
+            }
+          },
+          onSelectPlace: handleVoiceSelectPlace,
           getContext: () => ({
-            city: selectedCity.name,
+            city:
+              selectedCity.country === 'India'
+                ? `${selectedCity.name}, ${selectedCity.state}`
+                : `${selectedCity.name}, ${selectedCity.country}`,
             aqi: activeAqi.aqi,
             category: activeAqi.category,
             pm25: activeForecastPoint.medianPm25,
@@ -359,6 +455,7 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [
     currentLanguage,
+    setLanguage,
     selectedCity.name,
     activeAqi.aqi,
     activeAqi.category,
@@ -478,6 +575,10 @@ export default function App() {
         currentPage={currentPage}
         onPageChange={setCurrentPage}
         onOpenHowItWorks={() => setIsHowItWorksOpen(true)}
+        aqi={activeAqi.aqi}
+        category={activeAqi.category}
+        pm25={activeForecastPoint.medianPm25}
+        bestHour={bestOutdoorHour}
       />
 
       {/* Dynamic Red Alert Banner for Hazardous Air (AQI > 300 only, never hardcoded) */}
@@ -842,6 +943,7 @@ export default function App() {
         onClose={() => setIsVoiceAssistantOpen(false)}
         selectedCity={selectedCity}
         currentAqi={activeAqi.aqi}
+        onSelectCity={handleSelectCity}
       />
 
       <HowItWorksModal

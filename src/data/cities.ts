@@ -293,7 +293,7 @@ const BASE_CITIES: CityData[] = [
   {
     id: 'chandigarh',
     name: 'Chandigarh',
-    state: 'Punjab & Haryana',
+    state: 'Chandigarh',
     district: 'Chandigarh',
     country: 'India',
     continent: 'Asia',

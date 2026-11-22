@@ -161,6 +161,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setCurrentLanguageState(lang);
     try {
       localStorage.setItem(STORAGE_KEY, lang);
+      localStorage.setItem('lang', lang);
       const cached = localStorage.getItem(`${CACHE_PREFIX}${lang}`);
       if (cached) {
         setDynamicDict(JSON.parse(cached));
@@ -169,6 +170,9 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     } catch {
       // Ignore
+    }
+    if (window.AirCastAssistant?.setLanguage && window.AirCastAssistant.getLang?.() !== lang) {
+      window.AirCastAssistant.setLanguage(lang);
     }
   }, []);
 

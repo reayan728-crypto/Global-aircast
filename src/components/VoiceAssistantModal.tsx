@@ -21,12 +21,14 @@ import { pm25ToAqi } from '../utils/aqi';
 import { LANGUAGES, LanguageCode } from '../utils/i18n';
 import { useLanguage } from '../context/LanguageContext';
 import { analyzeVoiceQueryOffThread } from '../utils/aiWorkerClient';
+import { findBestCityMatch } from '../utils/placeMatcher';
 
 interface VoiceAssistantModalProps {
   isOpen: boolean;
   onClose: () => void;
   selectedCity: CityData;
   currentAqi: number;
+  onSelectCity?: (city: CityData) => void;
 }
 
 interface TranscriptEntry {
@@ -88,7 +90,8 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
   isOpen,
   onClose,
   selectedCity,
-  currentAqi
+  currentAqi,
+  onSelectCity
 }) => {
   const { currentLanguage, setLanguage } = useLanguage();
   const [activeCity, setActiveCity] = useState<CityData>(selectedCity);
@@ -211,16 +214,27 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
     window.speechSynthesis.speak(utterance);
   };
 
-  // Submit question for ANY city / country with stream-based token handler & Web Worker acceleration
+  // Submit question for ANY city / state / country with stream-based token handler & Web Worker acceleration
   const handleAskAssistant = async (questionText: string, targetCityData?: CityData) => {
     const q = questionText.trim();
     if (!q) return;
 
-    const cityToQuery = targetCityData || activeCity;
+    const matchedPlace = !targetCityData ? findBestCityMatch(q) : null;
+    const cityToQuery = targetCityData || matchedPlace || activeCity;
+    if (matchedPlace && matchedPlace.id !== activeCity.id) {
+      setActiveCity(matchedPlace);
+      onSelectCity?.(matchedPlace);
+    }
     const cityAqi = pm25ToAqi(cityToQuery.basePm25);
 
     // Stop ongoing speech
     handleStopSpeaking();
+
+    if (matchedPlace && matchedPlace.id !== activeCity.id) {
+      setConnectionStatus(
+        `Switched location to ${matchedPlace.name}, ${matchedPlace.state ? matchedPlace.state + ', ' : ''}${matchedPlace.country}`
+      );
+    }
 
     // Append user message immediately
     const userEntry: TranscriptEntry = {
@@ -418,8 +432,9 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
   // Switch active city from picker and auto-explain
   const handleSelectCity = (city: CityData) => {
     setActiveCity(city);
+    onSelectCity?.(city);
     setShowCityPicker(false);
-    handleAskAssistant(`Explain current air quality, AQI, and health advisory for ${city.name}, ${city.state || city.country}.`, city);
+    handleAskAssistant(`Explain current air quality, AQI, and health advisory for ${city.name}, ${city.state ? city.state + ', ' : ''}${city.country}.`, city);
   };
 
   // Handle language switch inside modal
@@ -585,13 +600,21 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
         <div className="p-3 sm:p-4 bg-radial from-slate-900/90 to-transparent flex flex-col items-center justify-center border-b border-white/5">
           <div className="relative w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center mb-2">
             <div
-              className={`absolute inset-0 rounded-full bg-[#00b050]/20 transition-transform duration-300 ${
-                isTalking ? 'scale-125 animate-ping opacity-35' : 'scale-100 opacity-10'
+              className={`absolute inset-0 rounded-full transition-transform duration-300 ${
+                isListening
+                  ? 'bg-rose-500/25 scale-125 animate-ping opacity-45'
+                  : isTalking
+                  ? 'bg-[#00b050]/20 scale-125 animate-ping opacity-35'
+                  : 'bg-[#00b050]/20 scale-100 opacity-10'
               }`}
             />
             <div
-              className={`absolute inset-1.5 rounded-full border-2 border-[#00b050] transition-all duration-300 ${
-                isTalking ? 'scale-110 shadow-[0_0_20px_#00b050]' : 'scale-100 opacity-40'
+              className={`absolute inset-1.5 rounded-full border-2 transition-all duration-300 ${
+                isListening
+                  ? 'border-rose-500 scale-110 shadow-[0_0_20px_rgba(244,63,94,0.65)]'
+                  : isTalking
+                  ? 'border-[#00b050] scale-110 shadow-[0_0_20px_#00b050]'
+                  : 'border-[#00b050] scale-100 opacity-40'
               }`}
             />
 
@@ -599,15 +622,16 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
               onClick={toggleSpeechRecognition}
               className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-lg ${
                 isListening
-                  ? 'bg-rose-600 text-white animate-pulse'
+                  ? 'bg-rose-600 text-white voice-haptic-listening shadow-[0_0_22px_rgba(225,29,72,0.7)] ring-2 ring-rose-300/80'
                   : isTalking
                   ? 'bg-[#00b050] text-white'
                   : 'bg-white/15 hover:bg-white/25 text-white border border-white/20'
               }`}
               title={isListening ? 'Listening... Tap to Stop' : `Tap to Speak in ${currentLangObj.name}`}
+              aria-pressed={isListening}
             >
               {isListening ? (
-                <Mic className="w-5 h-5 sm:w-6 sm:h-6 animate-spin" />
+                <Mic className="w-5 h-5 sm:w-6 sm:h-6" />
               ) : isTalking ? (
                 <Volume2 className="w-5 h-5 sm:w-6 sm:h-6 animate-bounce" />
               ) : (
@@ -745,10 +769,11 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
               <button
                 type="button"
                 onClick={toggleSpeechRecognition}
-                className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg transition-colors cursor-pointer ${
-                  isListening ? 'text-rose-400 animate-pulse' : 'text-slate-400 hover:text-white'
+                className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg transition-all cursor-pointer ${
+                  isListening ? 'text-rose-400 voice-haptic-listening' : 'text-slate-400 hover:text-white'
                 }`}
                 title={`Speak in ${currentLangObj.name}`}
+                aria-pressed={isListening}
               >
                 <Mic className="w-4 h-4" />
               </button>

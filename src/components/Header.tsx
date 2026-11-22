@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Wind,
   Search,
@@ -15,7 +15,9 @@ import {
   Globe,
   ChevronDown,
   Layers,
-  HelpCircle
+  HelpCircle,
+  MessageSquare,
+  Accessibility
 } from 'lucide-react';
 import { CityData, CITIES } from '../data/cities';
 import { useLanguage } from '../context/LanguageContext';
@@ -35,6 +37,10 @@ interface HeaderProps {
   currentPage?: 1 | 2;
   onPageChange?: (page: 1 | 2) => void;
   onOpenHowItWorks?: () => void;
+  aqi?: number;
+  category?: string;
+  pm25?: number;
+  bestHour?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -47,7 +53,11 @@ export const Header: React.FC<HeaderProps> = ({
   onStartGame,
   currentPage = 1,
   onPageChange,
-  onOpenHowItWorks
+  onOpenHowItWorks,
+  aqi = 50,
+  category = 'Good',
+  pm25 = 15,
+  bestHour = '11:00'
 }) => {
   const { t, currentLanguage, setLanguage, selectedLanguageOption } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
@@ -55,6 +65,84 @@ export const Header: React.FC<HeaderProps> = ({
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(false);
   const [isLangDropdownOpen, setIsLangDropdownOpen] = useState(false);
+  const [deafActive, setDeafActive] = useState(false);
+  const [blindActive, setBlindActive] = useState(false);
+
+  // Sync jumping emoji animation on <html> when Deaf mode is active
+  useEffect(() => {
+    document.documentElement.classList.toggle('a11y-deaf-jump', deafActive);
+    return () => {
+      document.documentElement.classList.remove('a11y-deaf-jump');
+    };
+  }, [deafActive]);
+
+  // Whenever Blind mode is active and city/AQI changes, speak full live readout (including Good & Satisfactory)
+  useEffect(() => {
+    if (!blindActive) return;
+    const adviceKey =
+      aqi <= 100
+        ? 'a11yAdviceGood'
+        : aqi <= 200
+        ? 'a11yAdviceModerate'
+        : aqi <= 300
+        ? 'a11yAdvicePoor'
+        : 'a11yAdviceSevere';
+    const summary = `${t('a11yMainAqiCardSummary', {
+      city: selectedCity.name,
+      aqi,
+      category,
+      pm25
+    })} ${t('a11ySummaryTemplate', {
+      city: selectedCity.name,
+      aqi,
+      category,
+      bestHour
+    })} ${t(adviceKey)}`;
+    window.AirCastA11y?.speak(summary, true);
+  }, [blindActive, selectedCity.name, aqi, category, pm25, bestHour, t]);
+
+  const handleDeafToggle = () => {
+    const next = !deafActive;
+    setDeafActive(next);
+    window.AirCastA11y?.setOption?.('deaf', next);
+    window.AirCastA11y?.setOption?.('sign', next);
+    if (next && window.AirCastAnim) {
+      const level = window.AirCastAnim.levelOf(aqi);
+      window.AirCastAnim.popup(level, `${selectedCity.name}: AQI ${aqi} (${category})`);
+    }
+  };
+
+  const handleDumbClick = () => {
+    window.AirCastComm?.open();
+  };
+
+  const handleLanguageChange = (code: LanguageCode) => {
+    setLanguage(code);
+    window.AirCastAssistant?.setLanguage?.(code);
+  };
+
+  const handleBlindToggle = () => {
+    const next = !blindActive;
+    setBlindActive(next);
+    window.AirCastA11y?.setOption?.('voice', next);
+    if (next) {
+      const adviceKey =
+        aqi <= 100
+          ? 'a11yAdviceGood'
+          : aqi <= 200
+          ? 'a11yAdviceModerate'
+          : aqi <= 300
+          ? 'a11yAdvicePoor'
+          : 'a11yAdviceSevere';
+      const msg = `${t('a11yMainAqiCardSummary', {
+        city: selectedCity.name,
+        aqi,
+        category,
+        pm25
+      })} ${t(adviceKey)}`;
+      window.AirCastA11y?.speak(msg, true);
+    }
+  };
 
   const filteredCities = searchQuery.trim()
     ? CITIES.filter(
@@ -120,33 +208,57 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Page 1 / Page 2 Quick Switcher (Desktop) */}
-          {onPageChange && (
-            <div className="hidden md:inline-flex p-0.5 rounded-xl bg-slate-100 border border-slate-200/80 text-xs font-bold shrink-0">
-              <button
-                onClick={() => onPageChange(1)}
-                className={`px-3 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  currentPage === 1
-                    ? 'bg-white text-[#0c1d2d] shadow-xs'
-                    : 'text-slate-600 hover:text-[#0c1d2d]'
-                }`}
-              >
-                <Radio className="w-3.5 h-3.5" />
-                <span>Page 1: Telemetry &amp; Air Clock</span>
-              </button>
-              <button
-                onClick={() => onPageChange(2)}
-                className={`px-3 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                  currentPage === 2
-                    ? 'bg-white text-[#0c1d2d] shadow-xs'
-                    : 'text-slate-600 hover:text-[#0c1d2d]'
-                }`}
-              >
-                <Cpu className="w-3.5 h-3.5" />
-                <span>Page 2: Diagnostics &amp; SHAP</span>
-              </button>
-            </div>
-          )}
+          {/* Deaf, Dumb & Blind Emoji Mode Bar (Top Center, replacing Page 1 / Page 2) */}
+          <div
+            className="hidden md:inline-flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 border border-slate-200/80 shrink-0"
+            role="group"
+            aria-label="Deaf, Dumb, and Blind Accessibility Modes"
+          >
+            <button
+              type="button"
+              onClick={handleDeafToggle}
+              aria-pressed={deafActive}
+              aria-label={t('deafModeLabel')}
+              title={`${t('deafModeLabel')} — Jumping emojis & sign panel`}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+                deafActive
+                  ? 'bg-amber-500 text-slate-950 shadow-xs ring-2 ring-amber-300'
+                  : 'bg-white text-[#0c1d2d] hover:bg-amber-50'
+              }`}
+            >
+              <span className={`text-base leading-none ${deafActive ? 'deaf-jump-emoji inline-block' : 'inline-block'}`} aria-hidden="true">
+                🦻
+              </span>
+              <span>{t('deafModeLabel')}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDumbClick}
+              aria-label={t('nonSpeakingModeLabel')}
+              title={`${t('nonSpeakingModeLabel')} — Ask questions & get instant answers`}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 bg-white text-[#0c1d2d] hover:bg-blue-50 active:scale-95"
+            >
+              <span className="text-base leading-none" aria-hidden="true">🤐</span>
+              <span>{t('nonSpeakingModeLabel')}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleBlindToggle}
+              aria-pressed={blindActive}
+              aria-label={t('blindModeLabel')}
+              title={`${t('blindModeLabel')} — Hear live voice readout for all AQI levels`}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+                blindActive
+                  ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-300'
+                  : 'bg-white text-[#0c1d2d] hover:bg-emerald-50'
+              }`}
+            >
+              <span className="text-base leading-none" aria-hidden="true">🧑‍🦯</span>
+              <span>{t('blindModeLabel')}</span>
+            </button>
+          </div>
 
           {/* Desktop Search bar */}
           <div className="hidden 2xl:flex items-center gap-2 flex-1 max-w-xs relative">
@@ -197,21 +309,12 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Desktop Right Side Navigation + Language Dropdown */}
           <div className="hidden lg:flex items-center gap-1.5 shrink-0">
             <button
-              onClick={onOpenVoiceAssistant}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-800 hover:bg-emerald-500/25 active:scale-95 cursor-pointer shadow-xs"
-              title="Open Live Voice Assistant (gemini-3.8-live)"
+              onClick={() => window.AirCastComm?.open()}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white active:scale-95 cursor-pointer shadow-xs"
+              title={t('communicationMode')}
             >
-              <Mic className="w-3.5 h-3.5 text-[#00b050] animate-pulse" />
-              <span>{t('liveVoice')}</span>
-            </button>
-
-            <button
-              onClick={onStartGame}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 bg-[#14202e] hover:bg-[#1f2d3d] text-white active:scale-95 cursor-pointer shadow-xs"
-              title="Play Clean Air Pilot: Atmospheric Drone Dispatcher"
-            >
-              <Gamepad2 className="w-3.5 h-3.5 text-[#bfe3ff]" />
-              <span>{t('cleanAirGame')}</span>
+              <MessageSquare className="w-3.5 h-3.5 text-white" />
+              <span>{t('communicationMode')}</span>
             </button>
 
             {onOpenHowItWorks && (
@@ -231,7 +334,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <Globe className="w-3.5 h-3.5 text-slate-500" />
                 <select
                   value={currentLanguage}
-                  onChange={e => setLanguage(e.target.value as LanguageCode)}
+                  onChange={e => handleLanguageChange(e.target.value as LanguageCode)}
                   aria-label="Select World Language"
                   className="bg-transparent text-xs font-bold text-[#0c1d2d] focus:outline-none cursor-pointer pr-1"
                 >
@@ -258,7 +361,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="relative">
               <select
                 value={currentLanguage}
-                onChange={e => setLanguage(e.target.value as LanguageCode)}
+                onChange={e => handleLanguageChange(e.target.value as LanguageCode)}
                 aria-label="Select Language"
                 className="bg-slate-100 border border-slate-200 text-xs font-bold text-[#0c1d2d] py-1 px-1.5 rounded-lg cursor-pointer focus:outline-none max-w-[80px]"
               >
@@ -271,20 +374,63 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             <button
-              onClick={onOpenVoiceAssistant}
-              className="p-2 rounded-lg text-xs font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-800 cursor-pointer"
-              aria-label="Open Voice Assistant"
+              onClick={() => window.AirCastComm?.open()}
+              className="p-2 rounded-lg text-xs font-bold bg-blue-600 text-white cursor-pointer"
+              aria-label={t('communicationMode')}
+              title={t('communicationMode')}
             >
-              <Mic className="w-4 h-4 text-[#00b050]" />
+              <MessageSquare className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
+
+        {/* Always-Visible Mobile Top Bar: Deaf, Dumb & Blind Emoji Modes (Phone < md) */}
+        <div
+          className="md:hidden border-t border-[#14202e]/10 bg-slate-50/95 px-3 py-1.5"
+          role="group"
+          aria-label="Deaf, Dumb, and Blind Accessibility Modes"
+        >
+          <div className="grid grid-cols-3 gap-1.5 max-w-[1280px] mx-auto">
+            <button
+              type="button"
+              onClick={handleDeafToggle}
+              aria-pressed={deafActive}
+              aria-label={t('deafModeLabel')}
+              className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 ${
+                deafActive
+                  ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs ring-2 ring-amber-300'
+                  : 'bg-white text-[#0c1d2d] border-slate-200 hover:bg-amber-50'
+              }`}
+            >
+              <span className={`text-base leading-none ${deafActive ? 'deaf-jump-emoji inline-block' : 'inline-block'}`} aria-hidden="true">
+                🦻
+              </span>
+              <span className="truncate">{t('deafModeLabel')}</span>
             </button>
 
-            {/* The Three Dash Buttons (Hamburger Menu) */}
             <button
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              aria-label="Open Navigation Menu"
-              className="p-2 rounded-lg bg-[#14202e] text-white hover:bg-[#1f2d3d] transition-colors cursor-pointer flex items-center justify-center"
+              type="button"
+              onClick={handleDumbClick}
+              aria-label={t('nonSpeakingModeLabel')}
+              className="py-1.5 px-2 rounded-lg text-xs font-bold border border-slate-200 bg-white text-[#0c1d2d] hover:bg-blue-50 transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
             >
-              {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              <span className="text-base leading-none" aria-hidden="true">🤐</span>
+              <span className="truncate">{t('nonSpeakingModeLabel')}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleBlindToggle}
+              aria-pressed={blindActive}
+              aria-label={t('blindModeLabel')}
+              className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 ${
+                blindActive
+                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-300'
+                  : 'bg-white text-[#0c1d2d] border-slate-200 hover:bg-emerald-50'
+              }`}
+            >
+              <span className="text-base leading-none" aria-hidden="true">🧑‍🦯</span>
+              <span className="truncate">{t('blindModeLabel')}</span>
             </button>
           </div>
         </div>
@@ -313,7 +459,7 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Native Dropdown Selector for all languages in the world */}
               <select
                 value={currentLanguage}
-                onChange={e => setLanguage(e.target.value as LanguageCode)}
+                onChange={e => handleLanguageChange(e.target.value as LanguageCode)}
                 className="w-full py-2.5 px-3 text-xs font-bold bg-white border border-[#14202e]/15 rounded-xl text-[#0c1d2d] focus:outline-none focus:ring-2 focus:ring-[#1f6feb] cursor-pointer"
               >
                 {LANGUAGES.map(lang => (
@@ -324,50 +470,54 @@ export const Header: React.FC<HeaderProps> = ({
               </select>
             </div>
 
-            {/* Mobile Page 1 / Page 2 Switcher */}
-            {onPageChange && (
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => {
-                    onPageChange(1);
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className={`p-3 rounded-xl text-left border flex flex-col gap-1 transition-all cursor-pointer ${
-                    currentPage === 1
-                      ? 'bg-[#14202e] text-white border-[#14202e] shadow-sm'
-                      : 'bg-white text-slate-700 border-slate-200'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 font-bold text-xs">
-                    <Radio className="w-3.5 h-3.5" />
-                    <span>Page 1</span>
-                  </div>
-                  <span className={`text-[11px] ${currentPage === 1 ? 'text-slate-300' : 'text-slate-500'}`}>
-                    Telemetry &amp; Air Clock
-                  </span>
-                </button>
+            {/* Mobile Deaf / Dumb / Blind Emoji Bar */}
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  handleDeafToggle();
+                  setIsMobileMenuOpen(false);
+                }}
+                aria-pressed={deafActive}
+                className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 text-xs font-bold cursor-pointer transition-all ${
+                  deafActive
+                    ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-sm'
+                    : 'bg-white text-[#0c1d2d] border-slate-200'
+                }`}
+              >
+                <span className={`text-xl ${deafActive ? 'deaf-jump-emoji inline-block' : ''}`} aria-hidden="true">🦻</span>
+                <span>{t('deafModeLabel')}</span>
+              </button>
 
-                <button
-                  onClick={() => {
-                    onPageChange(2);
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className={`p-3 rounded-xl text-left border flex flex-col gap-1 transition-all cursor-pointer ${
-                    currentPage === 2
-                      ? 'bg-[#14202e] text-white border-[#14202e] shadow-sm'
-                      : 'bg-white text-slate-700 border-slate-200'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 font-bold text-xs">
-                    <Cpu className="w-3.5 h-3.5" />
-                    <span>Page 2</span>
-                  </div>
-                  <span className={`text-[11px] ${currentPage === 2 ? 'text-slate-300' : 'text-slate-500'}`}>
-                    Diagnostics &amp; SHAP
-                  </span>
-                </button>
-              </div>
-            )}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  handleDumbClick();
+                }}
+                className="p-2.5 rounded-xl border bg-white text-[#0c1d2d] border-slate-200 flex flex-col items-center justify-center gap-1 text-xs font-bold cursor-pointer transition-all hover:bg-blue-50"
+              >
+                <span className="text-xl" aria-hidden="true">🤐</span>
+                <span>{t('nonSpeakingModeLabel')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  handleBlindToggle();
+                  setIsMobileMenuOpen(false);
+                }}
+                aria-pressed={blindActive}
+                className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 text-xs font-bold cursor-pointer transition-all ${
+                  blindActive
+                    ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm'
+                    : 'bg-white text-[#0c1d2d] border-slate-200'
+                }`}
+              >
+                <span className="text-xl" aria-hidden="true">🧑‍🦯</span>
+                <span>{t('blindModeLabel')}</span>
+              </button>
+            </div>
 
             {/* Mobile Search input */}
             <div className="relative w-full">
@@ -423,30 +573,17 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </div>
 
-            {/* Quick Action buttons */}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => {
-                  setIsMobileMenuOpen(false);
-                  onOpenVoiceAssistant();
-                }}
-                className="p-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 text-xs font-bold flex items-center gap-2 cursor-pointer"
-              >
-                <Mic className="w-4 h-4 text-[#00b050]" />
-                <span>{t('liveVoice')}</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setIsMobileMenuOpen(false);
-                  onStartGame();
-                }}
-                className="p-2.5 rounded-xl bg-[#14202e] hover:bg-[#1f2d3d] text-white text-xs font-bold flex items-center gap-2 cursor-pointer"
-              >
-                <Gamepad2 className="w-4 h-4 text-[#bfe3ff]" />
-                <span>{t('cleanAirGame')}</span>
-              </button>
-            </div>
+            {/* Quick Action button: Communication Mode */}
+            <button
+              onClick={() => {
+                setIsMobileMenuOpen(false);
+                window.AirCastComm?.open();
+              }}
+              className="w-full p-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <MessageSquare className="w-4 h-4 text-white" />
+              <span>{t('communicationMode')}</span>
+            </button>
 
             {onOpenHowItWorks && (
               <button

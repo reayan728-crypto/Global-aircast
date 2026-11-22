@@ -485,7 +485,12 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     a11yWorldMapSummary: 'Interactive global air quality satellite map centered on {city} ({country}), AQI {aqi} ({category}). Tracks planetary air quality stations, industrial plants, active fires, and {stormCount} tropical storms.',
     a11yLiveSynced: 'Live air quality data refreshed for {city}. Current AQI is {aqi}, {category}.',
     a11yUrgentTriageAlert: 'Urgent respiratory alert for {city}: {tier}. {explanation}',
-    a11yPictogramLabel: 'Animated air quality guidance'
+    a11yPictogramLabel: 'Animated air quality guidance',
+    communicationMode: 'Communication Mode',
+    accessibilityMode: 'Accessibility',
+    deafModeLabel: 'Deaf Mode',
+    blindModeLabel: 'Blind Mode',
+    nonSpeakingModeLabel: 'Speech Mode'
   },
 
   hi: {

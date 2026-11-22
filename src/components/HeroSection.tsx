@@ -15,6 +15,7 @@ import {
 import { CityData, CITIES, INDIAN_STATES_HIERARCHY } from '../data/cities';
 import { useLanguage } from '../context/LanguageContext';
 import { pm25ToAqi } from '../utils/aqi';
+import { findBestCityMatch } from '../utils/placeMatcher';
 import { AqiPictogram } from './AqiPictogram';
 
 export interface LiveTelemetryMeta {
@@ -129,8 +130,8 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
   };
 
   const handleQuickFind = () => {
-    if (searchResults.length > 0) {
-      const target = searchResults[0];
+    const target = searchResults[0] || findBestCityMatch(typeSearch);
+    if (target) {
       setSelectedCountry(target.country);
       if (target.country === 'India') {
         setSelectedIndianState(target.state);
