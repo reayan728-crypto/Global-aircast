@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  X,
   Mic,
   Radio,
   Volume2,
@@ -8,20 +7,28 @@ import {
   Sparkles,
   MessageSquareQuote,
   Send,
-  Globe2,
   Search,
   Square,
   LogOut,
   Languages,
   Zap,
-  Activity
+  Compass,
+  ChevronRight,
+  RotateCcw
 } from 'lucide-react';
 import { CityData, CITIES } from '../data/cities';
 import { pm25ToAqi } from '../utils/aqi';
 import { LANGUAGES, LanguageCode } from '../utils/i18n';
 import { useLanguage } from '../context/LanguageContext';
 import { analyzeVoiceQueryOffThread } from '../utils/aiWorkerClient';
-import { findBestCityMatch } from '../utils/placeMatcher';
+import {
+  findBestCityMatch,
+  findCountryMatch,
+  findStateMatch,
+  findCityInScope,
+  isLocationChangeCommand,
+  detectGuidedLocationTrigger
+} from '../utils/placeMatcher';
 
 interface VoiceAssistantModalProps {
   isOpen: boolean;
@@ -93,6 +100,8 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
   currentAqi,
   onSelectCity
 }) => {
+  type GuidedStep = 'idle' | 'country' | 'state' | 'city';
+
   const { currentLanguage, setLanguage } = useLanguage();
   const [activeCity, setActiveCity] = useState<CityData>(selectedCity);
   const [selectedVoiceLang, setSelectedVoiceLang] = useState<LanguageCode>(currentLanguage);
@@ -105,12 +114,18 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
   const [showCityPicker, setShowCityPicker] = useState<boolean>(false);
   const [connectionStatus, setConnectionStatus] = useState<string>('Voice Engine Ready');
 
+  // Voice-Guided Location Selector state
+  const [guidedStep, setGuidedStep] = useState<GuidedStep>('idle');
+  const [guidedCountry, setGuidedCountry] = useState<string>(selectedCity.country);
+  const [guidedState, setGuidedState] = useState<string>(selectedCity.state);
+  const [guidedHint, setGuidedHint] = useState<string>('');
+
   const currentLangObj = LANGUAGES.find(l => l.code === selectedVoiceLang) || LANGUAGES[0];
 
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([
     {
       sender: 'assistant',
-      text: `Hello! I am your AirCast Global Voice Assistant. I explain real-time air quality, PM2.5 levels, and health directives for ${selectedCity.name} (${selectedCity.country}) or any location worldwide in your chosen language. Speak or type below!`,
+      text: `Hello! I am your AirCast Global Voice Assistant. I explain real-time air quality, PM2.5 levels, and can switch your Country, State, and City by voice. Tap Voice Location or say "Change country to Japan" or "Switch state to Kerala".`,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       location: selectedCity.name,
       aqi: currentAqi,
@@ -120,10 +135,49 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
 
   const recognitionRef = useRef<any>(null);
   const transcriptsEndRef = useRef<HTMLDivElement | null>(null);
+  const guidedStepRef = useRef<GuidedStep>('idle');
+  const guidedCountryRef = useRef<string>(selectedCity.country);
+  const guidedStateRef = useRef<string>(selectedCity.state);
+  const micAutoTimerRef = useRef<number | null>(null);
 
-  // Sync with prop when selectedCity changes
+  const setGuidedStepSynced = (step: GuidedStep) => {
+    guidedStepRef.current = step;
+    setGuidedStep(step);
+  };
+
+  const setGuidedCountrySynced = (country: string) => {
+    guidedCountryRef.current = country;
+    setGuidedCountry(country);
+  };
+
+  const setGuidedStateSynced = (state: string) => {
+    guidedStateRef.current = state;
+    setGuidedState(state);
+  };
+
+  // Unique country, state, and city lists for the guided selector
+  const availableCountries = useMemo(() => {
+    const list = Array.from(new Set(CITIES.map(c => c.country)));
+    return ['India', ...list.filter(c => c !== 'India')];
+  }, []);
+
+  const availableStatesInCountry = useMemo(() => {
+    return Array.from(
+      new Set(CITIES.filter(c => c.country === guidedCountry).map(c => c.state))
+    );
+  }, [guidedCountry]);
+
+  const availableCitiesInState = useMemo(() => {
+    return CITIES.filter(c => c.country === guidedCountry && c.state === guidedState);
+  }, [guidedCountry, guidedState]);
+
+  // Sync with prop when selectedCity changes externally
   useEffect(() => {
     setActiveCity(selectedCity);
+    if (guidedStepRef.current === 'idle') {
+      setGuidedCountrySynced(selectedCity.country);
+      setGuidedStateSynced(selectedCity.state);
+    }
   }, [selectedCity]);
 
   // Sync voice language when global language changes
@@ -136,21 +190,56 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
     transcriptsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [transcripts, isTalking]);
 
+  const clearMicTimer = () => {
+    if (micAutoTimerRef.current !== null) {
+      window.clearTimeout(micAutoTimerRef.current);
+      micAutoTimerRef.current = null;
+    }
+  };
+
   // Stop all voice processes and clean up
   const handleStopSpeaking = () => {
+    clearMicTimer();
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop();
+      } catch {
+        // ignore stop errors
+      }
+      recognitionRef.current = null;
     }
     setIsTalking(false);
     setIsListening(false);
     setConnectionStatus('Voice stopped');
   };
 
+  const cancelGuidedLocation = (announce = false) => {
+    setGuidedStepSynced('idle');
+    setGuidedHint('');
+    if (announce) {
+      const msg = 'Voice location selector closed.';
+      setTranscripts(prev => [
+        ...prev,
+        {
+          sender: 'assistant',
+          text: msg,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          location: activeCity.name,
+          language: currentLangObj.name
+        }
+      ]);
+      speakText(msg, selectedVoiceLang);
+    }
+  };
+
   // Exit assistant completely
   const handleExit = () => {
+    setGuidedStepSynced('idle');
+    setGuidedHint('');
     handleStopSpeaking();
     onClose();
   };
@@ -158,6 +247,8 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
   // Cleanup speech synthesis on unmount or close
   useEffect(() => {
     if (!isOpen) {
+      setGuidedStepSynced('idle');
+      setGuidedHint('');
       handleStopSpeaking();
     }
   }, [isOpen]);
@@ -173,9 +264,26 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
       ).slice(0, 8)
     : CITIES.slice(0, 8);
 
-  // Speak aloud function using browser SpeechSynthesis with language matching
-  const speakText = (text: string, langCode: LanguageCode) => {
-    if (isMuted || !('speechSynthesis' in window)) return;
+  // Speak aloud function using browser SpeechSynthesis with language matching & post-speech callback
+  const speakText = (text: string, langCode: LanguageCode, onAfterSpeak?: () => void) => {
+    clearMicTimer();
+    let settled = false;
+    const finishSpeech = () => {
+      if (settled) return;
+      settled = true;
+      setIsTalking(false);
+      setConnectionStatus('Ready');
+      if (onAfterSpeak) {
+        micAutoTimerRef.current = window.setTimeout(() => {
+          onAfterSpeak();
+        }, 160);
+      }
+    };
+
+    if (isMuted || !('speechSynthesis' in window)) {
+      finishSpeech();
+      return;
+    }
 
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
@@ -196,33 +304,453 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
       utterance.voice = matchingVoice;
     }
 
+    const safetyTimeoutMs = Math.max(4500, text.split(/\s+/).length * 480 + 2500);
+    const safetyTimer = window.setTimeout(finishSpeech, safetyTimeoutMs);
+
     utterance.onstart = () => {
       setIsTalking(true);
       setConnectionStatus(`Speaking in ${currentLangObj.name}...`);
     };
 
     utterance.onend = () => {
-      setIsTalking(false);
-      setConnectionStatus('Voice playback completed');
+      window.clearTimeout(safetyTimer);
+      finishSpeech();
     };
 
     utterance.onerror = () => {
-      setIsTalking(false);
-      setConnectionStatus('Ready');
+      window.clearTimeout(safetyTimer);
+      finishSpeech();
     };
 
     window.speechSynthesis.speak(utterance);
   };
 
-  // Submit question for ANY city / state / country with stream-based token handler & Web Worker acceleration
+  // Start SpeechRecognition cleanly (prevents hearing itself)
+  const beginRecognitionSession = () => {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setConnectionStatus('Speech recognition unavailable. Type or tap an option below.');
+      return;
+    }
+
+    clearMicTimer();
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setIsTalking(false);
+    }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop();
+      } catch {
+        // ignore stop error
+      }
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = getBcp47Tag(selectedVoiceLang);
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        const step = guidedStepRef.current;
+        if (step !== 'idle') {
+          setConnectionStatus(`Listening for ${step}... Speak now.`);
+        } else {
+          setConnectionStatus(`Listening in ${currentLangObj.name}... Speak now.`);
+        }
+      };
+
+      recognition.onresult = (event: any) => {
+        const spokenText = event.results?.[0]?.[0]?.transcript;
+        if (spokenText) {
+          setInputText(spokenText);
+          if (guidedStepRef.current !== 'idle') {
+            handleGuidedLocationInput(spokenText);
+          } else {
+            handleAskAssistant(spokenText);
+          }
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn('Speech recognition notice:', event.error);
+        setIsListening(false);
+        setConnectionStatus('Microphone closed. Tap mic or choose below.');
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        recognitionRef.current = null;
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (e: any) {
+      console.warn('Speech recognition init notice:', e.message);
+      setIsListening(false);
+    }
+  };
+
+  const formatFullLocationLabel = (city: CityData) => {
+    const parts = [city.name];
+    if (city.state && city.state !== city.name) parts.push(city.state);
+    parts.push(city.country);
+    return parts.join(', ');
+  };
+
+  // Start or jump to a step in Voice-Guided Location Selector
+  const startGuidedLocationSelector = (startAt: 'country' | 'state' | 'city' = 'country') => {
+    handleStopSpeaking();
+    setShowCityPicker(false);
+
+    if (startAt === 'country') {
+      setGuidedStepSynced('country');
+      const promptMsg =
+        'Voice location selector active. Step 1: Say the country name, such as India, United States, Japan, or United Kingdom.';
+      setGuidedHint('Say a country name (e.g. India, Japan, United States)');
+      setTranscripts(prev => [
+        ...prev,
+        {
+          sender: 'assistant',
+          text: promptMsg,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          location: activeCity.name,
+          language: currentLangObj.name
+        }
+      ]);
+      speakText(promptMsg, selectedVoiceLang, beginRecognitionSession);
+      return;
+    }
+
+    if (startAt === 'state') {
+      const curCountry = guidedCountryRef.current || activeCity.country;
+      setGuidedCountrySynced(curCountry);
+      const statesInCountry = Array.from(
+        new Set(CITIES.filter(c => c.country === curCountry).map(c => c.state))
+      );
+      const examples = statesInCountry.slice(0, 4).join(', ');
+      setGuidedStepSynced('state');
+      const promptMsg = `Step 2 for ${curCountry}: Say the state or region, for example ${examples}, or say skip.`;
+      setGuidedHint(`Say a state or region in ${curCountry} (or say skip)`);
+      setTranscripts(prev => [
+        ...prev,
+        {
+          sender: 'assistant',
+          text: promptMsg,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          location: curCountry,
+          language: currentLangObj.name
+        }
+      ]);
+      speakText(promptMsg, selectedVoiceLang, beginRecognitionSession);
+      return;
+    }
+
+    const curCountry = guidedCountryRef.current || activeCity.country;
+    const curState = guidedStateRef.current || activeCity.state;
+    setGuidedCountrySynced(curCountry);
+    setGuidedStateSynced(curState);
+    const citiesInScope = CITIES.filter(c => c.country === curCountry && c.state === curState);
+    const examples = citiesInScope.slice(0, 4).map(c => c.name).join(', ');
+    setGuidedStepSynced('city');
+    const promptMsg = `Step 3 for ${curState}, ${curCountry}: Say the city or district, for example ${examples}.`;
+    setGuidedHint(`Say a city or district in ${curState}`);
+    setTranscripts(prev => [
+      ...prev,
+      {
+        sender: 'assistant',
+        text: promptMsg,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        location: curState,
+        language: currentLangObj.name
+      }
+    ]);
+    speakText(promptMsg, selectedVoiceLang, beginRecognitionSession);
+  };
+
+  // Complete location switch and speak final confirmation
+  const completeGuidedLocation = (city: CityData, customPrefix?: string) => {
+    setGuidedCountrySynced(city.country);
+    setGuidedStateSynced(city.state);
+    setActiveCity(city);
+    onSelectCity?.(city);
+    setGuidedStepSynced('idle');
+    setGuidedHint('');
+
+    const cityAqi = pm25ToAqi(city.basePm25);
+    const fullLabel = formatFullLocationLabel(city);
+    const confirmationText = `${customPrefix ? customPrefix + ' ' : ''}Location updated to ${fullLabel}. Current air quality is ${cityAqi.category} with AQI ${cityAqi.aqi} and PM2.5 ${city.basePm25} micrograms per cubic metre.`;
+
+    setTranscripts(prev => [
+      ...prev,
+      {
+        sender: 'assistant',
+        text: confirmationText,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        location: city.name,
+        aqi: cityAqi.aqi,
+        language: currentLangObj.name
+      }
+    ]);
+    setConnectionStatus(`Updated to ${fullLabel}`);
+    speakText(confirmationText, selectedVoiceLang);
+  };
+
+  // Process spoken or tapped choice inside Voice-Guided Location Selector
+  const handleGuidedLocationInput = (rawText: string) => {
+    const q = rawText.trim();
+    if (!q) return;
+
+    setInputText('');
+    setTranscripts(prev => [
+      ...prev,
+      {
+        sender: 'user',
+        text: q,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        location: activeCity.name
+      }
+    ]);
+
+    const lower = q.toLowerCase();
+    if (/^(?:cancel|stop|exit|close|nevermind|never mind)$/i.test(lower)) {
+      cancelGuidedLocation(true);
+      return;
+    }
+
+    if (/^(?:skip|done|keep|confirm|finish)$/i.test(lower)) {
+      const target =
+        CITIES.find(
+          c => c.country === guidedCountryRef.current && c.state === guidedStateRef.current
+        ) || activeCity;
+      completeGuidedLocation(target);
+      return;
+    }
+
+    if (/^(?:back|previous|go back)$/i.test(lower)) {
+      if (guidedStepRef.current === 'city') {
+        startGuidedLocationSelector('state');
+      } else {
+        startGuidedLocationSelector('country');
+      }
+      return;
+    }
+
+    const step = guidedStepRef.current;
+
+    if (step === 'country') {
+      const matchedCountry = findCountryMatch(q);
+      if (matchedCountry) {
+        const countryCities = CITIES.filter(c => c.country === matchedCountry);
+        const statesInCountry = Array.from(new Set(countryCities.map(c => c.state)));
+        const defaultCity = countryCities[0] || activeCity;
+        setGuidedCountrySynced(matchedCountry);
+        setGuidedStateSynced(defaultCity.state);
+        setActiveCity(defaultCity);
+        onSelectCity?.(defaultCity);
+
+        if (statesInCountry.length > 1) {
+          const examples = statesInCountry.slice(0, 4).join(', ');
+          const msg = `Country set to ${matchedCountry}. Step 2: Say the state or region, such as ${examples}, or say skip.`;
+          setGuidedStepSynced('state');
+          setGuidedHint(`Country: ${matchedCountry} · Say state or say skip`);
+          setTranscripts(prev => [
+            ...prev,
+            {
+              sender: 'assistant',
+              text: msg,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              location: matchedCountry,
+              language: currentLangObj.name
+            }
+          ]);
+          speakText(msg, selectedVoiceLang, beginRecognitionSession);
+        } else {
+          completeGuidedLocation(defaultCity);
+        }
+        return;
+      }
+
+      // Allow jumping directly if user named a state or city on Step 1
+      const directCity = findBestCityMatch(q);
+      if (directCity) {
+        const directStateMatch = findStateMatch(q);
+        const citiesInState = CITIES.filter(
+          c => c.country === directCity.country && c.state === directCity.state
+        );
+        if (directStateMatch && citiesInState.length > 1 && directStateMatch.toLowerCase() !== directCity.name.toLowerCase()) {
+          setGuidedCountrySynced(directCity.country);
+          setGuidedStateSynced(directCity.state);
+          setActiveCity(directCity);
+          onSelectCity?.(directCity);
+          const examples = citiesInState.slice(0, 4).map(c => c.name).join(', ');
+          const msg = `Selected ${directCity.state}, ${directCity.country}. Step 3: Say a city or district such as ${examples}, or say skip.`;
+          setGuidedStepSynced('city');
+          setGuidedHint(`State: ${directCity.state} · Say city or say skip`);
+          setTranscripts(prev => [
+            ...prev,
+            {
+              sender: 'assistant',
+              text: msg,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              location: directCity.state,
+              language: currentLangObj.name
+            }
+          ]);
+          speakText(msg, selectedVoiceLang, beginRecognitionSession);
+        } else {
+          completeGuidedLocation(directCity);
+        }
+        return;
+      }
+
+      const retryMsg =
+        'I did not catch that country. Please say a country like India, United States, Japan, or United Kingdom, or say cancel.';
+      setGuidedHint('Try saying India, United States, Japan, or cancel');
+      setTranscripts(prev => [
+        ...prev,
+        {
+          sender: 'assistant',
+          text: retryMsg,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          location: activeCity.name,
+          language: currentLangObj.name
+        }
+      ]);
+      speakText(retryMsg, selectedVoiceLang, beginRecognitionSession);
+      return;
+    }
+
+    if (step === 'state') {
+      const matchedState = findStateMatch(q, guidedCountryRef.current);
+      if (matchedState) {
+        const stateCities = CITIES.filter(c => c.state === matchedState);
+        const primaryCity =
+          stateCities.find(c => c.country === guidedCountryRef.current) || stateCities[0];
+        if (primaryCity) {
+          setGuidedCountrySynced(primaryCity.country);
+          setGuidedStateSynced(primaryCity.state);
+          setActiveCity(primaryCity);
+          onSelectCity?.(primaryCity);
+
+          const citiesInScope = CITIES.filter(
+            c => c.country === primaryCity.country && c.state === primaryCity.state
+          );
+          if (citiesInScope.length > 1) {
+            const examples = citiesInScope.slice(0, 4).map(c => c.name).join(', ');
+            const msg = `State set to ${primaryCity.state}. Step 3: Say the city or district, such as ${examples}, or say skip.`;
+            setGuidedStepSynced('city');
+            setGuidedHint(`State: ${primaryCity.state} · Say city or district`);
+            setTranscripts(prev => [
+              ...prev,
+              {
+                sender: 'assistant',
+                text: msg,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                location: primaryCity.state,
+                language: currentLangObj.name
+              }
+            ]);
+            speakText(msg, selectedVoiceLang, beginRecognitionSession);
+          } else {
+            completeGuidedLocation(primaryCity);
+          }
+          return;
+        }
+      }
+
+      const directCity = findBestCityMatch(q);
+      if (directCity) {
+        completeGuidedLocation(directCity);
+        return;
+      }
+
+      const fallbackStates = CITIES.filter(c => c.country === guidedCountryRef.current);
+      const stateSamples = Array.from(new Set(fallbackStates.map(c => c.state)))
+        .slice(0, 3)
+        .join(', ');
+      const retryMsg = `I did not find that state in ${guidedCountryRef.current}. Say a state such as ${stateSamples}, or say skip.`;
+      setGuidedHint(`Try ${stateSamples}, or say skip`);
+      setTranscripts(prev => [
+        ...prev,
+        {
+          sender: 'assistant',
+          text: retryMsg,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          location: guidedCountryRef.current,
+          language: currentLangObj.name
+        }
+      ]);
+      speakText(retryMsg, selectedVoiceLang, beginRecognitionSession);
+      return;
+    }
+
+    if (step === 'city') {
+      const matchedCity = findCityInScope(q, guidedCountryRef.current, guidedStateRef.current);
+      if (matchedCity) {
+        completeGuidedLocation(matchedCity);
+        return;
+      }
+
+      const citySamples = CITIES.filter(
+        c => c.country === guidedCountryRef.current && c.state === guidedStateRef.current
+      )
+        .slice(0, 3)
+        .map(c => c.name)
+        .join(', ');
+      const retryMsg = `I could not match that city. Please say a city such as ${citySamples || activeCity.name}, or say cancel.`;
+      setGuidedHint(`Try ${citySamples || activeCity.name}, or say cancel`);
+      setTranscripts(prev => [
+        ...prev,
+        {
+          sender: 'assistant',
+          text: retryMsg,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          location: guidedStateRef.current,
+          language: currentLangObj.name
+        }
+      ]);
+      speakText(retryMsg, selectedVoiceLang, beginRecognitionSession);
+    }
+  };
+
+  // Submit question for ANY city / state / country with direct voice location switching & stream telemetry
   const handleAskAssistant = async (questionText: string, targetCityData?: CityData) => {
     const q = questionText.trim();
     if (!q) return;
+
+    if (!targetCityData && guidedStepRef.current !== 'idle') {
+      handleGuidedLocationInput(q);
+      return;
+    }
+
+    const guidedTrigger = !targetCityData ? detectGuidedLocationTrigger(q) : null;
+    if (guidedTrigger) {
+      setInputText('');
+      setTranscripts(prev => [
+        ...prev,
+        {
+          sender: 'user',
+          text: q,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          location: activeCity.name
+        }
+      ]);
+      startGuidedLocationSelector(guidedTrigger);
+      return;
+    }
 
     const matchedPlace = !targetCityData ? findBestCityMatch(q) : null;
     const cityToQuery = targetCityData || matchedPlace || activeCity;
     if (matchedPlace && matchedPlace.id !== activeCity.id) {
       setActiveCity(matchedPlace);
+      setGuidedCountrySynced(matchedPlace.country);
+      setGuidedStateSynced(matchedPlace.state);
       onSelectCity?.(matchedPlace);
     }
     const cityAqi = pm25ToAqi(cityToQuery.basePm25);
@@ -230,9 +758,37 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
     // Stop ongoing speech
     handleStopSpeaking();
 
+    // If user issued a direct location switch (e.g. "Change country to Japan", "Switch state to Kerala", or "Madurai"),
+    // update app state immediately and speak confirmation out loud without waiting on external streams.
+    if (matchedPlace && isLocationChangeCommand(q)) {
+      setInputText('');
+      const fullLabel = formatFullLocationLabel(matchedPlace);
+      const confirmationText = `Location changed to ${fullLabel}. Current air quality is ${cityAqi.category} with AQI ${cityAqi.aqi} and PM2.5 ${matchedPlace.basePm25} micrograms per cubic metre.`;
+      setTranscripts(prev => [
+        ...prev,
+        {
+          sender: 'user',
+          text: q,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          location: matchedPlace.name
+        },
+        {
+          sender: 'assistant',
+          text: confirmationText,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          location: matchedPlace.name,
+          aqi: cityAqi.aqi,
+          language: currentLangObj.name
+        }
+      ]);
+      setConnectionStatus(`Switched to ${fullLabel}`);
+      speakText(confirmationText, selectedVoiceLang);
+      return;
+    }
+
     if (matchedPlace && matchedPlace.id !== activeCity.id) {
       setConnectionStatus(
-        `Switched location to ${matchedPlace.name}, ${matchedPlace.state ? matchedPlace.state + ', ' : ''}${matchedPlace.country}`
+        `Switched location to ${formatFullLocationLabel(matchedPlace)}`
       );
     }
 
@@ -257,9 +813,9 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
         language: currentLangObj.name
       });
       immediateDirective = workerAnalysis.immediateDirective;
-      setConnectionStatus(`⚡ Worker [${workerAnalysis.intent}]: ${workerAnalysis.immediateDirective}`);
+      setConnectionStatus(workerAnalysis.immediateDirective);
     } catch {
-      setConnectionStatus(`Streaming response for ${cityToQuery.name}...`);
+      setConnectionStatus(`Preparing telemetry for ${cityToQuery.name}...`);
     }
 
     // 2. Prepare initial streaming assistant bubble in transcript
@@ -380,61 +936,34 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert('Speech recognition is not supported in this browser. Please type your query in the input box.');
+      setConnectionStatus('Speech recognition unavailable in this browser. Type your command below.');
       return;
     }
 
     if (isListening) {
+      clearMicTimer();
       if (recognitionRef.current) {
-        recognitionRef.current.stop();
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // ignore
+        }
       }
       setIsListening(false);
       return;
     }
 
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = getBcp47Tag(selectedVoiceLang);
-
-      recognition.onstart = () => {
-        setIsListening(true);
-        setConnectionStatus(`Listening in ${currentLangObj.name}... Speak now.`);
-      };
-
-      recognition.onresult = (event: any) => {
-        const spokenText = event.results?.[0]?.[0]?.transcript;
-        if (spokenText) {
-          setInputText(spokenText);
-          handleAskAssistant(spokenText);
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        console.warn('Speech recognition notice:', event.error);
-        setIsListening(false);
-        setConnectionStatus('Microphone closed. You can also type below.');
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch (e: any) {
-      console.warn('Speech recognition init notice:', e.message);
-      setIsListening(false);
-    }
+    beginRecognitionSession();
   };
 
   // Switch active city from picker and auto-explain
   const handleSelectCity = (city: CityData) => {
     setActiveCity(city);
+    setGuidedCountrySynced(city.country);
+    setGuidedStateSynced(city.state);
     onSelectCity?.(city);
     setShowCityPicker(false);
-    handleAskAssistant(`Explain current air quality, AQI, and health advisory for ${city.name}, ${city.state ? city.state + ', ' : ''}${city.country}.`, city);
+    handleAskAssistant(`Change location to ${city.name}, ${city.state ? city.state + ', ' : ''}${city.country}`);
   };
 
   // Handle language switch inside modal
@@ -448,10 +977,10 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
   // Dynamic suggestions for currently active city
   const activeCityAqi = pm25ToAqi(activeCity.basePm25);
   const suggestions = [
+    `Change location`,
     `How is the air quality in ${activeCity.name} right now?`,
     `What mask is needed for ${activeCity.name} (AQI ${activeCityAqi.aqi})?`,
-    `Is it safe for morning exercise in ${activeCity.name}?`,
-    `Explain PM2.5 in simple terms for ${activeCity.name}`
+    `Is it safe for morning exercise in ${activeCity.name}?`
   ];
 
   if (!isOpen) return null;
@@ -522,43 +1051,202 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
         </div>
 
         {/* VOICE LANGUAGE SELECTOR & LOCATION STRIP */}
-        <div className="px-3.5 py-2.5 bg-black/45 border-b border-white/10 flex flex-wrap items-center justify-between gap-2 text-xs">
-          {/* Active City */}
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-xl shrink-0">{activeCity.flag}</span>
+        <div className="px-4 py-3 bg-black/45 border-b border-white/10 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+          {/* Active Location Hierarchy (unboxed clean typography) */}
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="text-xl shrink-0" aria-hidden="true">{activeCity.flag}</span>
             <div className="min-w-0">
-              <span className="text-xs font-extrabold text-white truncate block">
-                {activeCity.name}{activeCity.district ? ` (${activeCity.district})` : ''}, {activeCity.country}
-              </span>
-              <span className="text-[10px] text-slate-400 font-mono">
-                AQI {activeCityAqi.aqi} • <strong style={{ color: activeCityAqi.color }}>{activeCityAqi.category}</strong>
-              </span>
+              <div className="text-xs font-semibold text-white truncate">
+                {activeCity.country} · {activeCity.state} · {activeCity.name}
+              </div>
+              <div className="text-[11px] text-slate-300 font-mono tabular-nums">
+                AQI {activeCityAqi.aqi} · <strong style={{ color: activeCityAqi.color }}>{activeCityAqi.category}</strong>
+              </div>
             </div>
-            <button
-              onClick={() => setShowCityPicker(!showCityPicker)}
-              className="ml-1 text-[10px] px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 text-cyan-300 border border-white/10 cursor-pointer"
-            >
-              Change
-            </button>
           </div>
 
-          {/* Language Dropdown (Speaks in all languages) */}
-          <div className="flex items-center gap-1.5 bg-white/10 px-2 py-1 rounded-xl border border-white/15">
-            <Languages className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <select
-              value={selectedVoiceLang}
-              onChange={e => handleLanguageChange(e.target.value as LanguageCode)}
-              aria-label="Select Voice Language"
-              className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer pr-1"
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => {
+                if (guidedStep !== 'idle') {
+                  cancelGuidedLocation(false);
+                } else {
+                  startGuidedLocationSelector('country');
+                }
+              }}
+              className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-semibold border flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-emerald-400 ${
+                guidedStep !== 'idle'
+                  ? 'bg-emerald-600 text-white border-emerald-400'
+                  : 'bg-white/10 hover:bg-white/20 text-emerald-300 border-white/15'
+              }`}
             >
-              {LANGUAGES.map(lang => (
-                <option key={lang.code} value={lang.code} className="bg-[#14202e] text-white">
-                  {lang.flag} {lang.nativeName} ({lang.name})
-                </option>
-              ))}
-            </select>
+              <Compass className="w-3.5 h-3.5 shrink-0" />
+              <span>{guidedStep !== 'idle' ? 'Voice Active' : 'Voice Location'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowCityPicker(!showCityPicker)}
+              className="min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-medium bg-white/10 hover:bg-white/20 text-slate-200 border border-white/15 cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-emerald-400"
+            >
+              Browse
+            </button>
+
+            {/* Language Dropdown */}
+            <div className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1.5 min-h-[36px] rounded-lg border border-white/15">
+              <Languages className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <select
+                value={selectedVoiceLang}
+                onChange={e => handleLanguageChange(e.target.value as LanguageCode)}
+                aria-label="Select Voice Language"
+                className="bg-transparent text-xs font-semibold text-white focus:outline-none cursor-pointer pr-1"
+              >
+                {LANGUAGES.map(lang => (
+                  <option key={lang.code} value={lang.code} className="bg-[#14202e] text-white">
+                    {lang.flag} {lang.nativeName} ({lang.name})
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
+
+        {/* VOICE-GUIDED LOCATION SELECTOR PANEL */}
+        {guidedStep !== 'idle' && (
+          <div
+            role="region"
+            aria-label="Voice-Guided Location Selector"
+            className="px-4 py-3 bg-[#0d1824] border-b border-white/15 space-y-2.5"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <h4 className="text-xs font-semibold text-white">
+                  Voice-Guided Location Selector
+                </h4>
+                <p className="text-[11px] text-slate-300 truncate" aria-live="polite">
+                  {guidedHint || 'Say Country, State, or City'}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {guidedStep !== 'country' && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      startGuidedLocationSelector(guidedStep === 'city' ? 'state' : 'country')
+                    }
+                    className="min-h-[32px] px-2.5 py-1 rounded-md text-[11px] font-medium bg-white/10 hover:bg-white/20 text-slate-200 border border-white/15 flex items-center gap-1 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Back</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => cancelGuidedLocation(true)}
+                  className="min-h-[32px] px-2.5 py-1 rounded-md text-[11px] font-medium bg-white/10 hover:bg-white/20 text-slate-300 border border-white/15 cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+
+            {/* 3-Step Interactive Stepper: 01. Country -> 02. State -> 03. City */}
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => startGuidedLocationSelector('country')}
+                className={`p-2 rounded-lg text-left border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-emerald-400 ${
+                  guidedStep === 'country'
+                    ? 'bg-emerald-500/15 border-emerald-400 text-white'
+                    : 'bg-white/5 border-white/15 text-slate-300 hover:bg-white/10'
+                }`}
+              >
+                <div className="text-[10px] text-slate-400 font-mono">01. Country</div>
+                <div className="text-xs font-semibold truncate">{guidedCountry}</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => startGuidedLocationSelector('state')}
+                className={`p-2 rounded-lg text-left border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-emerald-400 ${
+                  guidedStep === 'state'
+                    ? 'bg-emerald-500/15 border-emerald-400 text-white'
+                    : 'bg-white/5 border-white/15 text-slate-300 hover:bg-white/10'
+                }`}
+              >
+                <div className="text-[10px] text-slate-400 font-mono">02. State</div>
+                <div className="text-xs font-semibold truncate">{guidedState}</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => startGuidedLocationSelector('city')}
+                className={`p-2 rounded-lg text-left border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-emerald-400 ${
+                  guidedStep === 'city'
+                    ? 'bg-emerald-500/15 border-emerald-400 text-white'
+                    : 'bg-white/5 border-white/15 text-slate-300 hover:bg-white/10'
+                }`}
+              >
+                <div className="text-[10px] text-slate-400 font-mono">03. City</div>
+                <div className="text-xs font-semibold truncate">{activeCity.name}</div>
+              </button>
+            </div>
+
+            {/* Step-specific voice/tap options */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
+              {guidedStep === 'country' &&
+                availableCountries.slice(0, 12).map(country => (
+                  <button
+                    key={country}
+                    type="button"
+                    onClick={() => handleGuidedLocationInput(country)}
+                    className={`min-h-[34px] px-2.5 py-1 rounded-md text-[11px] font-medium border whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1 transition-colors ${
+                      country === guidedCountry
+                        ? 'bg-emerald-600/30 border-emerald-400 text-white'
+                        : 'bg-white/5 hover:bg-white/15 border-white/15 text-slate-200'
+                    }`}
+                  >
+                    <span>{country}</span>
+                    <ChevronRight className="w-3 h-3 opacity-60" />
+                  </button>
+                ))}
+
+              {guidedStep === 'state' &&
+                availableStatesInCountry.slice(0, 14).map(stName => (
+                  <button
+                    key={stName}
+                    type="button"
+                    onClick={() => handleGuidedLocationInput(stName)}
+                    className={`min-h-[34px] px-2.5 py-1 rounded-md text-[11px] font-medium border whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1 transition-colors ${
+                      stName === guidedState
+                        ? 'bg-emerald-600/30 border-emerald-400 text-white'
+                        : 'bg-white/5 hover:bg-white/15 border-white/15 text-slate-200'
+                    }`}
+                  >
+                    <span>{stName}</span>
+                    <ChevronRight className="w-3 h-3 opacity-60" />
+                  </button>
+                ))}
+
+              {guidedStep === 'city' &&
+                availableCitiesInState.slice(0, 14).map(cityObj => (
+                  <button
+                    key={cityObj.id}
+                    type="button"
+                    onClick={() => handleGuidedLocationInput(cityObj.name)}
+                    className={`min-h-[34px] px-2.5 py-1 rounded-md text-[11px] font-medium border whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                      cityObj.id === activeCity.id
+                        ? 'bg-emerald-600/30 border-emerald-400 text-white'
+                        : 'bg-white/5 hover:bg-white/15 border-white/15 text-slate-200'
+                    }`}
+                  >
+                    {cityObj.name}
+                  </button>
+                ))}
+            </div>
+          </div>
+        )}
 
         {/* CITY SEARCH QUICK PICKER */}
         {showCityPicker && (
@@ -760,7 +1448,15 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
             <div className="relative flex-1">
               <input
                 type="text"
-                placeholder={`Ask in ${currentLangObj.name} about ${activeCity.name} or any city...`}
+                placeholder={
+                  guidedStep === 'country'
+                    ? 'Say or type a country (e.g. India, Japan, United States)...'
+                    : guidedStep === 'state'
+                    ? `Say or type a state in ${guidedCountry} (or say skip)...`
+                    : guidedStep === 'city'
+                    ? `Say or type a city in ${guidedState}...`
+                    : `Ask in ${currentLangObj.name} or say "Change country to Japan"...`
+                }
                 value={inputText}
                 onChange={e => setInputText(e.target.value)}
                 disabled={isLoading}
@@ -784,7 +1480,7 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
               disabled={isLoading || !inputText.trim()}
               className="px-4 py-2.5 rounded-xl bg-[#00b050] hover:bg-[#009b46] disabled:opacity-40 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md active:scale-95 shrink-0"
             >
-              <span>Ask</span>
+              <span>{guidedStep !== 'idle' ? 'Select' : 'Ask'}</span>
               <Send className="w-3.5 h-3.5" />
             </button>
           </form>

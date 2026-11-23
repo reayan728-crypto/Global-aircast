@@ -519,3 +519,197 @@ export function findBestCityMatch(rawQuery: string): CityData | null {
 
   return null;
 }
+
+const ALL_COUNTRIES = Array.from(new Set(CITIES.map(c => c.country)));
+
+export function findCountryMatch(rawQuery: string): string | null {
+  if (!rawQuery || !rawQuery.trim()) return null;
+  const cleaned = normalize(rawQuery);
+  const basic = stripAccents(extractTargetSegment(rawQuery))
+    .toLowerCase()
+    .replace(/['’.,!?/\\()\-_:;]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const candidates = Array.from(
+    new Set([resolveAlias(cleaned), cleaned, resolveAlias(basic), basic].filter(Boolean))
+  );
+
+  for (const q of candidates) {
+    const exact = ALL_COUNTRIES.find(c => stripAccents(c).toLowerCase() === q);
+    if (exact) return exact;
+  }
+
+  for (const q of [resolveAlias(cleaned), cleaned].filter(Boolean)) {
+    if (q.length < 4) continue;
+    const partial = ALL_COUNTRIES.find(c => {
+      const lc = stripAccents(c).toLowerCase();
+      return lc.startsWith(q) || lc.includes(q);
+    });
+    if (partial) return partial;
+  }
+
+  const paddedList = [` ${cleaned} `, ` ${basic} `].filter(s => s.trim().length > 0);
+  const countryAliases = Object.entries(PLACE_ALIASES).filter(([, target]) =>
+    COUNTRY_MAP.has(stripAccents(target).toLowerCase())
+  );
+  for (const buf of paddedList) {
+    for (const country of ALL_COUNTRIES) {
+      const lc = stripAccents(country).toLowerCase();
+      if (buf.includes(` ${lc} `)) return country;
+    }
+    for (const [alias, target] of countryAliases) {
+      if (alias.length >= 3 && buf.includes(` ${stripAccents(alias).toLowerCase()} `)) {
+        const mapped = COUNTRY_MAP.get(stripAccents(target).toLowerCase());
+        if (mapped) return mapped.country;
+      }
+    }
+  }
+
+  return null;
+}
+
+export function findStateMatch(rawQuery: string, countryFilter?: string): string | null {
+  if (!rawQuery || !rawQuery.trim()) return null;
+  const scopedCities = countryFilter ? CITIES.filter(c => c.country === countryFilter) : CITIES;
+  const pool = scopedCities.length > 0 ? scopedCities : CITIES;
+  const states = Array.from(new Set(pool.map(c => c.state)));
+
+  const cleaned = normalize(rawQuery);
+  const basic = stripAccents(extractTargetSegment(rawQuery))
+    .toLowerCase()
+    .replace(/['’.,!?/\\()\-_:;]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const candidates = Array.from(
+    new Set([resolveAlias(cleaned), cleaned, resolveAlias(basic), basic].filter(Boolean))
+  );
+
+  for (const q of candidates) {
+    const exact = states.find(s => stripAccents(s).toLowerCase() === q);
+    if (exact) return exact;
+  }
+
+  for (const q of [resolveAlias(cleaned), cleaned].filter(Boolean)) {
+    if (q.length < 4) continue;
+    const partial = states.find(s => {
+      const ls = stripAccents(s).toLowerCase();
+      return ls.startsWith(q) || ls.includes(q);
+    });
+    if (partial) return partial;
+  }
+
+  const stateAliases = Object.entries(PLACE_ALIASES).filter(([, target]) =>
+    STATE_MAP.has(stripAccents(target).toLowerCase())
+  );
+  const paddedList = [` ${cleaned} `, ` ${basic} `].filter(s => s.trim().length > 0);
+  for (const buf of paddedList) {
+    for (const state of states) {
+      const ls = stripAccents(state).toLowerCase();
+      if (buf.includes(` ${ls} `)) return state;
+    }
+    for (const [alias, target] of stateAliases) {
+      if (alias.length >= 3 && buf.includes(` ${stripAccents(alias).toLowerCase()} `)) {
+        const mapped = STATE_MAP.get(stripAccents(target).toLowerCase());
+        if (mapped && (!countryFilter || mapped.country === countryFilter)) {
+          return mapped.state;
+        }
+      }
+    }
+  }
+
+  // Fallback globally if user spoke a state from another country
+  if (countryFilter) {
+    return findStateMatch(rawQuery, undefined);
+  }
+  return null;
+}
+
+export function findCityInScope(
+  rawQuery: string,
+  countryFilter?: string,
+  stateFilter?: string
+): CityData | null {
+  if (!rawQuery || !rawQuery.trim()) return null;
+
+  const cleaned = normalize(rawQuery);
+  const basic = stripAccents(extractTargetSegment(rawQuery))
+    .toLowerCase()
+    .replace(/['’.,!?/\\()\-_:;]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const candidates = Array.from(
+    new Set([resolveAlias(cleaned), cleaned, resolveAlias(basic), basic].filter(Boolean))
+  );
+
+  const scopes: CityData[][] = [];
+  if (countryFilter && stateFilter) {
+    scopes.push(CITIES.filter(c => c.country === countryFilter && c.state === stateFilter));
+  }
+  if (countryFilter) {
+    scopes.push(CITIES.filter(c => c.country === countryFilter));
+  }
+
+  for (const list of scopes) {
+    if (!list.length) continue;
+    for (const q of candidates) {
+      const exact = list.find(
+        c =>
+          stripAccents(c.name).toLowerCase() === q ||
+          stripAccents(c.id).toLowerCase() === q ||
+          (c.district && stripAccents(c.district).toLowerCase() === q)
+      );
+      if (exact) return exact;
+    }
+    for (const q of [resolveAlias(cleaned), cleaned].filter(Boolean)) {
+      if (q.length < 3) continue;
+      const partial = list.find(
+        c =>
+          stripAccents(c.name).toLowerCase().startsWith(q) ||
+          stripAccents(c.name).toLowerCase().includes(q) ||
+          (c.district && stripAccents(c.district).toLowerCase().includes(q))
+      );
+      if (partial) return partial;
+    }
+  }
+
+  return findBestCityMatch(rawQuery);
+}
+
+const QUESTION_INTENT_RE =
+  /\b(?:how|what|why|when|should|can|could|would|do|does|is it safe|mask|n95|safe|outside|outdoor|exercise|walk|run|jog|forecast|tomorrow|tonight|pm2\.?5|explain|tell me|weather|best time|best hour|worst|window|hospital|doctor|cause|driver|reason|children|asthma)\b/i;
+
+const EXPLICIT_SWITCH_RE =
+  /\b(?:change|switch|set|select|choose|pick|move|open|show|go to|navigate|update)\b|बदलो|बदलें|दिखाओ|चुनो|மாற்று|காட்டு|தேர்ந்தெடு|మార్చు|చూపించు|ಬದಲಿಸಿ|ತೋರಿಸು|മാറ്റുക|കാണിക്കുക/i;
+
+export function isLocationChangeCommand(rawQuery: string): boolean {
+  const q = rawQuery.trim();
+  if (!q) return false;
+  if (QUESTION_INTENT_RE.test(q)) return false;
+  if (EXPLICIT_SWITCH_RE.test(q)) return true;
+  // Also treat bare place utterances (<= 5 words) as direct location switch requests
+  return q.split(/\s+/).length <= 5;
+}
+
+export function detectGuidedLocationTrigger(
+  rawQuery: string
+): 'country' | 'state' | 'city' | null {
+  const q = rawQuery.trim().toLowerCase();
+  if (!q) return null;
+  if (findBestCityMatch(q)) return null;
+  if (/\b(?:voice\s+location|location\s+selector|change\s+location|switch\s+location|select\s+location|set\s+location)\b/.test(q)) {
+    return 'country';
+  }
+  if (/\b(?:change|switch|select|choose|set|pick)\s+(?:the\s+)?country\b/.test(q)) {
+    return 'country';
+  }
+  if (/\b(?:change|switch|select|choose|set|pick)\s+(?:the\s+)?(?:state|province|region|ut)\b/.test(q)) {
+    return 'state';
+  }
+  if (/\b(?:change|switch|select|choose|set|pick)\s+(?:the\s+)?(?:city|district|station)\b/.test(q)) {
+    return 'city';
+  }
+  return null;
+}
+
