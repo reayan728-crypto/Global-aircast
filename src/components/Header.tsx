@@ -170,10 +170,10 @@ export const Header: React.FC<HeaderProps> = ({
       onOpenApiModal();
       return;
     }
-    // Switch to page 1 for air clock or world map, or page 2 for simulator/shap/maps
-    if ((id === 'air-clock-section' || id === 'global-world-map-section') && onPageChange && currentPage !== 1) {
+    // Switch to page 1 for air clock or maps grounding, or page 2 for simulator
+    if ((id === 'air-clock-section' || id === 'maps-grounding-section') && onPageChange && currentPage !== 1) {
       onPageChange(1);
-    } else if ((id === 'what-if-section' || id === 'maps-grounding-section') && onPageChange && currentPage !== 2) {
+    } else if (id === 'what-if-section' && onPageChange && currentPage !== 2) {
       onPageChange(2);
     }
     setTimeout(() => {

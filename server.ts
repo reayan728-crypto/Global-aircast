@@ -220,25 +220,106 @@ function generateSynthesizedMapPlaces(
   };
 }
 
-// Endpoint: Google Maps Grounding with gemini-3.8-flash (with quota caching and fallback)
-app.post('/api/maps/grounding', async (req, res) => {
-  const { query, lat, lng, cityName } = req.body;
-  const targetCity = cityName || 'Selected Metro';
-  const cacheKey = `${targetCity}_${query || 'default'}_${lat}_${lng}`;
+// Endpoint: Provide runtime Google Maps browser key (supports VITE_GOOGLE_MAPS_API_KEY or GOOGLE_MAPS_API_KEY)
+app.get('/api/maps/config', (_req, res) => {
+  const mapsKey = process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
+  return res.json({ apiKey: mapsKey, configured: Boolean(mapsKey) });
+});
 
-  // Check cache
+// Endpoint: Places API (New) Nearby Search proxy for Hospitals & Pharmacies (avoids CORS trap CF1)
+app.post('/api/maps/places-nearby', async (req, res) => {
+  const { lat, lng, types, radiusMeters = 15000 } = req.body || {};
+  const mapsKey = process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
+
+  if (typeof lat !== 'number' || typeof lng !== 'number' || Number.isNaN(lat) || Number.isNaN(lng)) {
+    return res.status(400).json({ error: 'Valid numeric lat and lng coordinates are required.' });
+  }
+  if (!mapsKey) {
+    return res.status(503).json({
+      error: 'Google Maps API key is not configured on the server yet.',
+      code: 'MAPS_KEY_MISSING',
+    });
+  }
+
+  const includedTypes =
+    Array.isArray(types) && types.length > 0 ? types.slice(0, 10) : ['hospital', 'pharmacy'];
+  const radius = Math.min(50000, Math.max(500, Number(radiusMeters) || 15000));
+
+  try {
+    const fieldMask = [
+      'places.id',
+      'places.displayName',
+      'places.formattedAddress',
+      'places.location',
+      'places.nationalPhoneNumber',
+      'places.internationalPhoneNumber',
+      'places.currentOpeningHours.openNow',
+      'places.regularOpeningHours.weekdayDescriptions',
+      'places.googleMapsUri',
+      'places.primaryType',
+      'places.types',
+    ].join(',');
+
+    const response = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': mapsKey,
+        'X-Goog-FieldMask': fieldMask,
+        'X-Goog-Maps-Solution-ID': 'gmp_mcp_codeassist_v1_aistudio',
+      },
+      body: JSON.stringify({
+        includedTypes,
+        maxResultCount: 18,
+        rankPreference: 'DISTANCE',
+        locationRestriction: {
+          circle: {
+            center: { latitude: lat, longitude: lng },
+            radius,
+          },
+        },
+      }),
+    });
+
+    const payload: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const errStatus = payload?.error?.status || '';
+      const isQuota = response.status === 429 || errStatus === 'RESOURCE_EXHAUSTED';
+      return res.status(isQuota ? 429 : response.status || 502).json({
+        error: payload?.error?.message || `Google Places API error (${response.status})`,
+        status: errStatus,
+        quotaExceeded: isQuota,
+      });
+    }
+
+    return res.json({ places: Array.isArray(payload.places) ? payload.places : [] });
+  } catch (err: any) {
+    console.error('[Places Nearby Proxy Error]', err?.message || err);
+    return res.status(502).json({ error: 'Unable to reach Google Places API. Check network connectivity.' });
+  }
+});
+
+// Endpoint: Google Maps Grounding with gemini-4-hydrogen (strict groundingChunks extraction, no schema override)
+app.post('/api/maps/grounding', async (req, res) => {
+  const { query, lat, lng, cityName } = req.body || {};
+  const targetCity = cityName || 'Selected Area';
+  const cacheKey = `${targetCity}_${query || 'default'}_${typeof lat === 'number' ? lat.toFixed(3) : 'none'}_${typeof lng === 'number' ? lng.toFixed(3) : 'none'}`;
+
   const cached = mapsGroundingCache.get(cacheKey);
   if (cached && cached.expiry > Date.now()) {
     return res.json(cached.data);
   }
 
   if (!apiKey) {
-    const fallback = generateSynthesizedMapPlaces(targetCity, query || '', lat, lng);
-    return res.json(fallback);
+    return res.status(503).json({
+      error: 'Gemini Maps Grounding requires a configured GEMINI_API_KEY.',
+      places: [],
+      groundingChunks: [],
+    });
   }
 
   try {
-    const promptText = `Find places in or near ${targetCity}: ${query || 'clean air parks, nature reserves, and emergency respiratory hospital clinics'}. Provide practical location guidance.`;
+    const promptText = `Find places in or near ${targetCity}: ${query || 'nearest emergency hospitals, 24-hour pharmacies, and clean air parks'}. Provide clear, practical guidance with names and highlights grounded in Google Maps.`;
 
     const config: any = {
       tools: [{ googleMaps: {} }],
@@ -256,7 +337,7 @@ app.post('/api/maps/grounding', async (req, res) => {
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-4-hydrogen',
       contents: promptText,
       config,
     });
@@ -264,35 +345,41 @@ app.post('/api/maps/grounding', async (req, res) => {
     const candidate = response.candidates?.[0];
     const groundingChunks = candidate?.groundingMetadata?.groundingChunks || [];
 
-    // Extract place cards with map URIs
-    const places: Array<{ title: string; uri: string }> = [];
+    const places: Array<{ title: string; uri: string; reviewSnippets?: string[] }> = [];
     groundingChunks.forEach((chunk: any) => {
       if (chunk.maps?.uri) {
+        const snippets = Array.isArray(chunk.maps.placeAnswerSources?.reviewSnippets)
+          ? chunk.maps.placeAnswerSources.reviewSnippets
+              .map((s: any) => s?.content || s?.text || '')
+              .filter(Boolean)
+          : [];
         places.push({
-          title: chunk.maps.title || 'Location on Google Maps',
+          title: chunk.maps.title || 'View on Google Maps',
           uri: chunk.maps.uri,
+          reviewSnippets: snippets,
         });
       }
     });
 
     const result = {
       text: response.text || '',
-      places: places.length > 0 ? places : generateSynthesizedMapPlaces(targetCity, query || '', lat, lng).places,
+      places,
       groundingChunks,
     };
 
     mapsGroundingCache.set(cacheKey, { data: result, expiry: Date.now() + CACHE_TTL_MS });
     return res.json(result);
   } catch (error: any) {
-    if (isQuotaOrRateLimitError(error)) {
-      console.warn(`[Maps Grounding] API quota limit reached. Serving verified geospatial points for ${targetCity}.`);
-    } else {
-      console.warn(`[Maps Grounding Notice] ${error?.message || 'Serving local map intelligence'}`);
-    }
-
-    const fallback = generateSynthesizedMapPlaces(targetCity, query || '', lat, lng);
-    mapsGroundingCache.set(cacheKey, { data: fallback, expiry: Date.now() + CACHE_TTL_MS });
-    return res.json(fallback);
+    const isQuota = isQuotaOrRateLimitError(error);
+    console.warn(`[Maps Grounding Error] ${error?.message || 'Unknown error'}`);
+    return res.status(isQuota ? 429 : 502).json({
+      error: isQuota
+        ? 'Google Maps grounding quota temporarily reached. Please try again shortly.'
+        : error?.message || 'Unable to load Google Maps grounding results right now.',
+      quotaExceeded: isQuota,
+      places: [],
+      groundingChunks: [],
+    });
   }
 });
 

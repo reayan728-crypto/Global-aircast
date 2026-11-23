@@ -424,4 +424,33 @@ html.a11y-large section {
   word-wrap: break-word;
 }
 
+/* Planetary Map Wind Streamline Animation (automatically freezes when Reduce Motion is enabled) */
+@keyframes argosWindFlow {
+  0% {
+    stroke-dashoffset: 18;
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.95;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.45;
+  }
+}
 
+.argos-wind-arrow {
+  animation: argosWindFlow 1.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .argos-wind-arrow,
+  .argos-motion-item {
+    animation: none !important;
+  }
+}
+
+html.a11y-rm .argos-wind-arrow,
+html.a11y-rm .argos-motion-item {
+  animation: none !important;
+}

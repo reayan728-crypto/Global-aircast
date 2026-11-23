@@ -12,9 +12,10 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
+    "@google/genai": "^3.6.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/compression": "^1.8.1",
+    "@vis.gl/react-google-maps": "^1.10.2",
     "@vitejs/plugin-react": "^6.1.1",
     "compression": "^1.8.2",
     "dotenv": "^17.2.3",

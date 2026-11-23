@@ -60,7 +60,7 @@ export const PWAInstallTopButton: React.FC<PWAInstallTopButtonProps> = ({
 
       {/* Instant Feedback Toast */}
       {installSuccessToast && (
-        <div className="absolute top-full left-0 mt-2 z-50 whitespace-nowrap px-3 py-1.5 rounded-lg bg-emerald-900 text-white text-xs font-semibold shadow-xl border border-emerald-600 animate-fade-in flex items-center gap-1.5">
+        <div className="fixed top-20 right-4 z-50 pointer-events-none max-w-[calc(100vw-2rem)] whitespace-nowrap px-3 py-1.5 rounded-lg bg-emerald-900 text-white text-xs font-semibold shadow-xl border border-emerald-600 animate-fade-in flex items-center gap-1.5">
           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" />
           <span>Installing AirCast...</span>
         </div>

@@ -29,7 +29,6 @@ import { BottomCta } from './components/BottomCta';
 import { Footer } from './components/Footer';
 
 import { MapsGroundingSection } from './components/MapsGroundingSection';
-import { GlobalWorldMap } from './components/GlobalWorldMap';
 import { LiveGroundingIntel } from './components/LiveGroundingIntel';
 import { VoiceAssistantModal } from './components/VoiceAssistantModal';
 import { AtmosphericGame } from './game/AtmosphericGame';
@@ -190,6 +189,14 @@ export default function App() {
   const [isGameActive, setIsGameActive] = useState(false);
   const [isHowItWorksOpen, setIsHowItWorksOpen] = useState(false);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [gmpQuotaExceeded, setGmpQuotaExceeded] = useState(false);
+
+  // Listen for Google Maps Platform quota/billing errors dispatched globally
+  useEffect(() => {
+    const onQuotaExceeded = () => setGmpQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', onQuotaExceeded);
+    return () => window.removeEventListener('gmp-quota-exceeded', onQuotaExceeded);
+  }, []);
 
   // Global shortcut to trigger hidden 37-language translation audit modal (Ctrl+Shift+T or Alt+Shift+L)
   useEffect(() => {
@@ -560,6 +567,34 @@ export default function App() {
         background: activeAqi.skyGradient
       }}
     >
+      {/* Google Maps Platform Case A Demo/Quota Notification Banner */}
+      {gmpQuotaExceeded && (
+        <div
+          role="alert"
+          className="sticky top-0 z-50 w-full bg-amber-50 border-b border-amber-300 text-amber-950 px-4 py-2.5 text-xs sm:text-sm font-medium flex flex-wrap items-center justify-between gap-2 shadow-sm"
+        >
+          <span>
+            Notice: The shared Google Maps demo quota is temporarily exceeded or unavailable. Map tiles and place lookups may be limited. Review{' '}
+            <a
+              href="https://developers.google.com/maps/documentation/javascript/error-messages?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline font-bold text-amber-900 hover:text-amber-700"
+            >
+              Google Maps Platform quota documentation
+            </a>{' '}
+            to use your own billing-enabled project key.
+          </span>
+          <button
+            type="button"
+            onClick={() => setGmpQuotaExceeded(false)}
+            className="px-2.5 py-1 rounded-lg bg-amber-200/80 hover:bg-amber-300 text-amber-950 font-bold text-xs cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Full-Page Interactive Ambient Air Flow Streamlines */}
       <AmbientAirFlow selectedCity={selectedCity} />
 
@@ -644,11 +679,8 @@ export default function App() {
             selectedCity={selectedCity}
           />
 
-          {/* Planetary Geospatial Network: Global World Map in Location Section */}
-          <GlobalWorldMap
-            selectedCity={selectedCity}
-            onSelectCity={handleSelectCity}
-          />
+          {/* Google Maps Platform Live: Clean-Air Hospitals, Pharmacies & Sanctuaries */}
+          <MapsGroundingSection selectedCity={selectedCity} />
 
           {/* UNIQUE TRANSITION HUB: END OF PAGE 1 -> MOVE TO PAGE 2 */}
           <section className="max-w-[1280px] w-full mx-auto px-4 sm:px-6 my-10">
@@ -785,8 +817,6 @@ export default function App() {
             onOpenSubscribe={() => setIsSubscribeOpen(true)}
           />
 
-          <MapsGroundingSection selectedCity={selectedCity} />
-
           <AuthoritativePortals />
 
           <PipelineSection />
@@ -872,7 +902,7 @@ export default function App() {
 
       {/* 1-Click Install Notification Toast */}
       {installToast && (
-        <div className="fixed top-20 right-4 z-50 px-4 py-2.5 rounded-xl bg-emerald-900/95 text-white text-xs font-bold shadow-2xl border border-emerald-500 flex items-center gap-2 animate-fade-in backdrop-blur-md">
+        <div className="fixed top-20 right-4 z-50 pointer-events-none px-4 py-2.5 rounded-xl bg-emerald-900/95 text-white text-xs font-bold shadow-2xl border border-emerald-500 flex items-center gap-2 animate-fade-in backdrop-blur-md">
           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           <span>{installToast}</span>
         </div>

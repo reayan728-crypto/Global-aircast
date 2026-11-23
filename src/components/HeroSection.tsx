@@ -142,11 +142,6 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
     }
   };
 
-  const scrollToWorldMap = () => {
-    const el = document.getElementById('global-world-map-section');
-    if (el) el.scrollIntoView({ behavior: 'smooth' });
-  };
-
   const aqiInfo = pm25ToAqi(selectedCity.basePm25);
 
   return (
@@ -183,13 +178,6 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
             >
               <span>{t('viewAirClock')}</span>
               <ArrowDown className="w-4 h-4" />
-            </button>
-            <button
-              onClick={scrollToWorldMap}
-              className="px-4 py-3 rounded-xl bg-white hover:bg-slate-50 text-[#14202e] font-bold text-xs sm:text-sm border border-[#14202e]/20 shadow-xs transition-all flex items-center gap-2 hover:translate-y-[-1px] active:scale-95 cursor-pointer"
-            >
-              <Globe className="w-4 h-4 text-[#1f6feb]" />
-              <span>{t('exploreWorldMapBtn')}</span>
             </button>
             <button
               onClick={onScrollToSimulator}
